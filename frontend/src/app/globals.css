@@ -1,0 +1,194 @@
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700&family=DM+Sans:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Verdes — marca Fórmula */
+  --verde-principal:       #5a8a4a;
+  --verde-hover:           #3b6d11;
+  --verde-claro:           #eaf3de;
+  --verde-texto:           #27500a;
+
+  /* Cinzas */
+  --cinza-900:             #1e1e1c;
+  --cinza-800:             #2c2c2a;
+  --cinza-600:             #6b6b6b;
+  --cinza-300:             #b4b2a9;
+  --cinza-100:             #f1efe8;
+  --cinza-50:              #f8f7f4;
+  --branco:                #ffffff;
+
+  /* Status */
+  --status-pendente-bg:    #fff3dd;
+  --status-pendente-text:  #7f5a1b;
+  --status-fazendo-bg:     #e6f1fb;
+  --status-fazendo-text:   #185fa5;
+  --status-pausado-bg:     #ececec;
+  --status-pausado-text:   #535353;
+  --status-ok-bg:          #eaf3de;
+  --status-ok-text:        #27500a;
+  --status-atend-bg:       #faeeda;
+  --status-atend-text:     #854f0b;
+  --status-gerado-bg:      #f1efe8;
+  --status-gerado-text:    #5f5e5a;
+  --status-impresso-bg:    #d3d1c7;
+  --status-impresso-text:  #2c2c2a;
+  --status-montada-bg:     #2c2c2a;
+  --status-montada-text:   #f1efe8;
+
+  /* Feedback */
+  --erro:                  #e24b4a;
+  --aviso:                 #ba7517;
+  --sucesso:               #3b6d11;
+
+  /* Superfícies e contraste */
+  --superficie-0:          var(--cinza-100);
+  --superficie-1:          var(--branco);
+  --superficie-2:          var(--cinza-50);
+  --texto-principal:       var(--cinza-800);
+  --texto-secundario:      var(--cinza-600);
+  --borda-padrao:          var(--cinza-300);
+  --sombra-elevada:        0 10px 24px rgba(24, 24, 22, 0.08);
+  --raio-card:             8px;
+  --espaco-pagina:         28px;
+  --espaco-card:           14px;
+  --tabela-padding:        14px;
+  --acao-neutra-bg:        #2f3230;
+  --acao-neutra-texto:     #ffffff;
+
+  /* Sidebar (fixa em tom escuro, independente do tema) */
+  --sidebar-bg:            #1b1d1b;
+  --sidebar-bg-elevada:    #232622;
+  --sidebar-texto:         #f1efe8;
+  --sidebar-texto-sec:     #c3bfb3;
+  --sidebar-texto-muted:   #9b9688;
+  --sidebar-borda:         rgba(255, 255, 255, 0.08);
+  --sidebar-hover:         rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="dark"] {
+  --cinza-900:             #0f1110;
+  --cinza-800:             #e9e6de;
+  --cinza-600:             #b8b4aa;
+  --cinza-300:             #4a4a46;
+  --cinza-100:             #171917;
+  --cinza-50:              #202320;
+  --branco:                #1b1d1b;
+
+  --verde-claro:           #223122;
+  --verde-texto:           #d6f0c9;
+
+  --status-pendente-bg:    #3e331f;
+  --status-pendente-text:  #f4d9a8;
+  --status-fazendo-bg:     #1c2f40;
+  --status-fazendo-text:   #b8ddff;
+  --status-pausado-bg:     #30302f;
+  --status-pausado-text:   #ddd9cf;
+  --status-ok-bg:          #223426;
+  --status-ok-text:        #cdeec6;
+  --status-atend-bg:       #3a2b1f;
+  --status-atend-text:     #ffd7a5;
+  --status-gerado-bg:      #31312f;
+  --status-gerado-text:    #e5e2d9;
+  --status-impresso-bg:    #4a4a46;
+  --status-impresso-text:  #f6f3eb;
+  --status-montada-bg:     #101211;
+  --status-montada-text:   #f1efe8;
+
+  --superficie-0:          #151816;
+  --superficie-1:          #1c1f1c;
+  --superficie-2:          #232724;
+  --texto-principal:       #ece9e1;
+  --texto-secundario:      #bdb8ad;
+  --borda-padrao:          #3c403c;
+  --sombra-elevada:        0 14px 32px rgba(0, 0, 0, 0.45);
+  --raio-card:             8px;
+  --espaco-pagina:         28px;
+  --espaco-card:           14px;
+  --tabela-padding:        14px;
+  --acao-neutra-bg:        #353a36;
+  --acao-neutra-texto:     #f4f2ec;
+
+  /* Mantém contraste da sidebar estável no dark */
+  --sidebar-bg:            #171a17;
+  --sidebar-bg-elevada:    #202420;
+  --sidebar-texto:         #f1efe8;
+  --sidebar-texto-sec:     #c3bfb3;
+  --sidebar-texto-muted:   #9b9688;
+  --sidebar-borda:         rgba(255, 255, 255, 0.1);
+  --sidebar-hover:         rgba(255, 255, 255, 0.08);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 15px;
+  color: var(--texto-principal);
+  background: var(--superficie-0);
+  -webkit-font-smoothing: antialiased;
+}
+
+input, select, textarea {
+  background: var(--superficie-1);
+  color: var(--texto-principal);
+  border-color: var(--borda-padrao);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--texto-secundario);
+}
+
+[data-theme="dark"] input,
+[data-theme="dark"] select,
+[data-theme="dark"] textarea {
+  background: var(--superficie-1) !important;
+  color: var(--texto-principal) !important;
+  border-color: var(--borda-padrao) !important;
+}
+
+[data-theme="dark"] option {
+  background: var(--superficie-1);
+  color: var(--texto-principal);
+}
+
+/* Focus visible global */
+:focus-visible {
+  outline: 2px solid var(--verde-principal);
+  outline-offset: 2px;
+}
+
+/* Animações globais */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+@keyframes slide-up {
+  from { transform: translateY(12px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+@keyframes slide-down {
+  from { transform: translateY(-100%); opacity: 0; }
+  to   { transform: translateY(0);     opacity: 1; }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes toast-in {
+  from { transform: translateX(20px); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
