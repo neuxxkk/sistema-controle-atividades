@@ -26,9 +26,9 @@ async def get_sessao_ativa(usuario_id: int, db: AsyncSession = Depends(get_db)):
     query = select(models.SessaoTrabalho).options(*_sessao_relacoes()).where(
         models.SessaoTrabalho.usuario_id == usuario_id,
         models.SessaoTrabalho.finalizado_em == None
-    )
+    ).order_by(models.SessaoTrabalho.iniciado_em.desc())
     result = await db.execute(query)
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 @router.post("/", response_model=schemas.SessaoTrabalho)
 async def iniciar_sessao(sessao: schemas.SessaoTrabalhoCreate, db: AsyncSession = Depends(get_db)):

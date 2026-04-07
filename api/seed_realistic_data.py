@@ -59,6 +59,7 @@ async def seed_realistic():
                 # Definir quantas sessões no dia (1 ou 2)
                 num_sessoes_dia = random.randint(1, 2)
                 
+                has_active_session = False
                 for s in range(num_sessoes_dia):
                     # Escolher uma atividade aleatória para este funcionário
                     ativ = random.choice(atividades_disponiveis)
@@ -76,14 +77,13 @@ async def seed_realistic():
                     fim = inicio + timedelta(seconds=duracao_segundos)
                     
                     # Se o fim for no futuro, tornar uma sessão ativa (se for hoje) ou ajustar
-                    is_ativa = False
                     if fim > agora:
-                        if data_atual.date() == agora.date():
-                            is_ativa = True
+                        if data_atual.date() == agora.date() and not has_active_session:
                             fim = None
                             duracao_segundos = None
+                            has_active_session = True
                         else:
-                            # Ajustar para não ultrapassar o "agora" em dias passados (teoricamente impossível mas preventivo)
+                            # Se já tem uma ativa ou não é hoje, ajustamos para fechar antes de agora
                             fim = agora - timedelta(minutes=5)
                             duracao_segundos = int((fim - inicio).total_seconds())
 

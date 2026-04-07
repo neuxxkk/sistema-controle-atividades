@@ -175,9 +175,9 @@ async def get_atividade_detalhe(atividade_id: int, db: AsyncSession = Depends(ge
         select(models.SessaoTrabalho.iniciado_em).where(
             models.SessaoTrabalho.atividade_id == atividade_id,
             models.SessaoTrabalho.finalizado_em == None,
-        )
+        ).order_by(models.SessaoTrabalho.iniciado_em.desc())
     )
-    em_andamento_desde = sessao_ativa.scalar_one_or_none()
+    em_andamento_desde = sessao_ativa.scalars().first()
 
     return schemas.AtividadeDetalhe(
         atividade=atividade,

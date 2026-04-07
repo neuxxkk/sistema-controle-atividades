@@ -129,7 +129,7 @@ CREATE TABLE sessoes_trabalho (
 ### Regras de status por tipo de atividade
 
 | Elemento | Subtipo | Status possíveis | Vincula funcionário? |
-|---|---|---|---|
+|-------|----------|-----------------|---|
 | Vigas | Rascunho | Gerado → Impresso → **Montada** (pronto para imprimir) | Não |
 | Vigas | Formato | Fazendo → Ok | Sim |
 | Lajes | Rascunho | Fazendo → Ok | Sim |

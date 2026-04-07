@@ -14,9 +14,9 @@ async def iniciar_sessao(usuario_id: int, atividade_id: int, db: AsyncSession):
     query = select(models.SessaoTrabalho).where(
         models.SessaoTrabalho.usuario_id == usuario_id,
         models.SessaoTrabalho.finalizado_em == None
-    )
+    ).order_by(models.SessaoTrabalho.iniciado_em.desc())
     result = await db.execute(query)
-    sessao_aberta = result.scalar_one_or_none()
+    sessao_aberta = result.scalars().first()
 
     if sessao_aberta:
         atividade = await db.get(models.Atividade, sessao_aberta.atividade_id)
