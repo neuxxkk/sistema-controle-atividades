@@ -6,7 +6,7 @@ import { useUsuario } from '@/context/UsuarioContext'
 import { useSessao } from '@/context/SessaoContext'
 import { useToast } from '@/context/ToastContext'
 import { api } from '@/lib/api'
-import { formatarTipoElemento } from '@/lib/constants'
+import { formatarTipoElemento, formatarLaje } from '@/lib/constants'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { ModalDetalheAtividade } from '@/components/atividades/ModalDetalheAtividade'
@@ -22,17 +22,16 @@ import {
   Moon,
   Play,
   Pause,
-  ArrowRight
+  ArrowRight,
+  FileSpreadsheet
 } from 'lucide-react'
 import type { Atividade, AtividadeDetalhe, ProximosStatusAtividade, SessaoTrabalho, StatusAtividade } from '@/types'
-
-const STATUS_ORDEM: StatusAtividade[] = ['Fazendo', 'Pendente', 'Gerado', 'Impresso', 'Montada', 'Atendendo comentarios', 'Ok']
 
 export function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
   const { usuario, limparUsuario } = useUsuario()
-  const { sessaoAtiva, iniciarSessao, pausarSessao, refreshSessao } = useSessao()
+  const { sessaoAtiva, iniciarSessao, pausarSessao, retomarSessao, avancarEtapa, finalizarAtividade, refreshSessao } = useSessao()
   const { addToast } = useToast()
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
   const [atividades, setAtividades] = useState<Atividade[]>([])
@@ -66,6 +65,7 @@ export function Sidebar() {
     ? [
         { label: 'Dashboard', icon: LayoutDashboard, href: '/admin' },
         { label: 'Edifícios', icon: Building2, href: '/admin/edificios' },
+        { label: 'Relatórios Detalhados', icon: FileSpreadsheet, href: '/admin/relatorios/produtividade' },
         { label: 'Construtoras', icon: Building, href: '/admin/construtoras' },
         { label: 'Usuários', icon: Users, href: '/admin/usuarios' },
       ]
@@ -91,8 +91,7 @@ export function Sidebar() {
       setSessoes(sess)
 
       const candidatas = ativs.filter(a => {
-        const concluida = a.status_atual === 'Ok' || a.status_atual === 'Montada' || a.status_atual === 'Atendendo comentarios'
-        return !concluida
+        return a.status_ciclo !== 'Finalizada'
       })
 
       const resultados = await Promise.allSettled(
@@ -122,43 +121,23 @@ export function Sidebar() {
 
   if (!usuario) return null
 
-  const tarefasPausadasIds = new Set(
-    sessoes
-      .filter(s => s.finalizado_em)
-      .map(s => s.atividade_id)
-      .filter(id => id !== sessaoAtiva?.atividade_id)
-  )
-
-  const sessoesPorAtividade = new Map<number, SessaoTrabalho[]>()
-  for (const sessao of sessoes) {
-    const lista = sessoesPorAtividade.get(sessao.atividade_id)
-    if (lista) {
-      lista.push(sessao)
-    } else {
-      sessoesPorAtividade.set(sessao.atividade_id, [sessao])
-    }
-  }
-
   const obterLabelInicio = (atividadeId: number, ativa: boolean) => {
     if (ativa) return 'Play'
     const atividade = atividades.find(a => a.id === atividadeId)
-    if (atividade?.status_atual === 'Pendente') return 'Play'
-    if (atividade?.status_atual === 'Fazendo') return 'Retomar'
-    const historico = sessoesPorAtividade.get(atividadeId) || []
-    if (historico.length === 0) return 'Play'
-    return 'Retomar'
+    if (!atividade) return 'Play'
+    return atividade.status_ciclo === 'Pausada' ? 'Retomar' : 'Play'
   }
 
   const obterLabelAvanco = (atividadeId: number) => {
     const atividade = atividades.find(a => a.id === atividadeId)
     if (!atividade) return 'Avançar'
 
-    if (atividade.tipo_elemento === 'Vigas' && atividade.subtipo === 'Rascunho') {
-      return atividade.status_atual === 'Impresso' ? 'Finalizar' : 'Avançar'
+    if ((atividade.status_ciclo === 'Em andamento' || atividade.status_ciclo === 'Pausada')
+      && atividade.etapa_atual >= atividade.etapa_total) {
+      return 'Finalizar'
     }
 
     const opcoes = proximosStatusPorAtividade[atividadeId] || []
-    if (atividade.status_atual === 'Fazendo') return 'Finalizar'
     if (opcoes.length === 1) return 'Avançar'
     if (opcoes.length > 1) return 'Avançar'
     return 'Avançar'
@@ -169,17 +148,24 @@ export function Sidebar() {
     return opcoes.length > 0
   }
 
+  const idsAtividadesComSessaoPropria = new Set(sessoes.map(s => s.activity_id ?? s.atividade_id))
+
   const tarefasRelevantes = atividades.filter(a => {
-    const ativa = sessaoAtiva?.atividade_id === a.id
-    const pausada = tarefasPausadasIds.has(a.id)
-    const concluida = a.status_atual === 'Ok' || a.status_atual === 'Montada' || a.status_atual === 'Atendendo comentarios'
-    return ativa || (pausada && !concluida)
+    const jaTocou = idsAtividadesComSessaoPropria.has(a.id)
+    const emAndamentoOuPausada = a.status_ciclo === 'Em andamento' || a.status_ciclo === 'Pausada'
+    return jaTocou && emAndamentoOuPausada
   })
 
-  const tarefasPorStatus = STATUS_ORDEM.map(status => ({
-    status,
-    lista: tarefasRelevantes.filter(t => t.status_atual === status),
-  })).filter(g => g.lista.length > 0)
+  const tarefasPorStatus = [
+    { 
+      status: 'Em andamento', 
+      lista: tarefasRelevantes.filter(t => t.status_ciclo === 'Em andamento') 
+    },
+    { 
+      status: 'Pausadas', 
+      lista: tarefasRelevantes.filter(t => t.status_ciclo === 'Pausada') 
+    },
+  ].filter(g => g.lista.length > 0)
 
   const abrirDetalhe = async (atividadeId: number) => {
     try {
@@ -193,6 +179,16 @@ export function Sidebar() {
 
   const solicitarAvanco = async (atividade: Atividade) => {
     try {
+      if (atividade.status_ciclo === 'Em andamento' || atividade.status_ciclo === 'Pausada') {
+        if (atividade.etapa_atual >= atividade.etapa_total) {
+          await finalizarAtividade(atividade.id)
+        } else {
+          await avancarEtapa(atividade.id)
+        }
+        await carregarSecaoFuncionario()
+        return
+      }
+
       const data = await api.get<ProximosStatusAtividade>(`/atividades/${atividade.id}/proximos-status`)
       if (!data.opcoes.length) {
         addToast('Sem próximo status disponível', 'aviso')
@@ -245,7 +241,7 @@ export function Sidebar() {
           {/* Fallback caso a imagem não exista */}
           <div style={{ position: 'relative', width: '180px' }}>
             <img 
-              src="/logo-formula.png" 
+              src="/banner.png" 
               alt="Fórmula Engenharia"
               style={{ width: '100%', height: 'auto', display: 'block' }}
               onError={(e) => {
@@ -315,28 +311,43 @@ export function Sidebar() {
 
                   {grupo.lista.map(atividade => {
                     const ativa = sessaoAtiva?.atividade_id === atividade.id
+                    const usuarioVinculado = atividade.usuario_responsavel?.nome
+                      || (atividade.usuario_responsavel_id ? `#${atividade.usuario_responsavel_id}` : 'Sem vínculo')
                     return (
                       <div key={atividade.id} style={{ background: ativa ? 'rgba(90, 138, 74, 0.18)' : 'var(--sidebar-bg-elevada)', border: ativa ? '1px solid var(--verde-principal)' : '1px solid var(--sidebar-borda)', borderRadius: '6px', padding: '8px' }}>
                         <button onClick={() => abrirDetalhe(atividade.id)} style={{ border: 'none', background: 'none', color: 'var(--sidebar-texto)', fontSize: '12px', fontWeight: 600, textAlign: 'left', cursor: 'pointer', width: '100%' }}>
                           {formatarTipoElemento(atividade.tipo_elemento, atividade.subtipo)}
                         </button>
                         <div style={{ color: 'var(--sidebar-texto-muted)', fontSize: '10px', marginTop: '2px' }}>
-                          {atividade.laje?.edificio?.nome || 'Edifício'}
+                          {atividade.laje?.edificio?.nome || 'Edifício'} · {atividade.laje ? formatarLaje(atividade.laje.tipo) : '—'}
                         </div>
+                        <div style={{ color: 'var(--sidebar-texto-muted)', fontSize: '10px', marginTop: '2px' }}>
+                          Etapa {atividade.etapa_atual}/{atividade.etapa_total}
+                        </div>
+                        {atividade.status_ciclo === 'Pausada' && atividade.usuario_responsavel_id !== usuario.usuario_id && (
+                          <div style={{ color: '#f59e0b', fontSize: '10px', marginTop: '4px', fontWeight: 600 }}>
+                            Vinculada a: {usuarioVinculado}
+                          </div>
+                        )}
 
                         <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
-                          <button onClick={() => iniciarSessao(atividade.id)} disabled={!!sessaoAtiva && !ativa} style={{ border: '1px solid var(--sidebar-borda)', background: 'var(--sidebar-hover)', color: 'var(--sidebar-texto)', borderRadius: '4px', padding: '4px 6px', cursor: !!sessaoAtiva && !ativa ? 'not-allowed' : 'pointer', opacity: !!sessaoAtiva && !ativa ? 0.5 : 1, fontSize: '10px', display: 'inline-flex', gap: '4px', alignItems: 'center' }}>
+                          <button onClick={() => {
+                            const acao = atividade.status_ciclo === 'Pausada'
+                              ? retomarSessao(atividade.id)
+                              : iniciarSessao(atividade.id)
+                            acao.catch(() => {})
+                          }} disabled={!!sessaoAtiva && !ativa} style={{ border: '1px solid var(--sidebar-borda)', background: 'var(--sidebar-hover)', color: 'var(--sidebar-texto)', borderRadius: '4px', padding: '4px 6px', cursor: !!sessaoAtiva && !ativa ? 'not-allowed' : 'pointer', opacity: !!sessaoAtiva && !ativa ? 0.5 : 1, fontSize: '10px', display: 'inline-flex', gap: '4px', alignItems: 'center' }}>
                             <Play size={12} />
                             {obterLabelInicio(atividade.id, ativa)}
                           </button>
-                          {ativa && (
-                            <button onClick={pausarSessao} style={{ border: '1px solid var(--sidebar-borda)', background: 'var(--sidebar-hover)', color: 'var(--sidebar-texto)', borderRadius: '4px', padding: '4px 6px', cursor: 'pointer', fontSize: '10px', display: 'inline-flex', gap: '4px', alignItems: 'center' }}>
+                          {ativa && atividade.status_ciclo === 'Em andamento' && (
+                            <button onClick={() => { pausarSessao().catch(() => {}) }} style={{ border: '1px solid var(--sidebar-borda)', background: 'var(--sidebar-hover)', color: 'var(--sidebar-texto)', borderRadius: '4px', padding: '4px 6px', cursor: 'pointer', fontSize: '10px', display: 'inline-flex', gap: '4px', alignItems: 'center' }}>
                               <Pause size={12} />
                               Pausar
                             </button>
                           )}
                           {podeMostrarAvanco(atividade.id) && (
-                            <button onClick={() => solicitarAvanco(atividade)} style={{ border: '1px solid var(--sidebar-borda)', background: 'var(--sidebar-hover)', color: 'var(--sidebar-texto)', borderRadius: '4px', padding: '4px 6px', cursor: 'pointer', fontSize: '10px', display: 'inline-flex', gap: '4px', alignItems: 'center' }}>
+                            <button onClick={() => { solicitarAvanco(atividade).catch(() => {}) }} style={{ border: '1px solid var(--sidebar-borda)', background: 'var(--sidebar-hover)', color: 'var(--sidebar-texto)', borderRadius: '4px', padding: '4px 6px', cursor: 'pointer', fontSize: '10px', display: 'inline-flex', gap: '4px', alignItems: 'center' }}>
                               <ArrowRight size={12} />
                               {obterLabelAvanco(atividade.id)}
                             </button>
