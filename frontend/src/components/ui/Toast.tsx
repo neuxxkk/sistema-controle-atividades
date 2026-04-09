@@ -52,7 +52,7 @@ export function Toast({ id, mensagem, tipo, onClose }: ToastProps) {
         style={{ 
           background: 'none', 
           border: 'none', 
-          color: 'var(--cinza-300)', 
+          color: 'var(--texto-secundario)', 
           cursor: 'pointer',
           fontSize: '18px',
           padding: '0 4px'

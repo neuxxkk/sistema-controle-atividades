@@ -62,7 +62,7 @@ export default function SelecaoUsuario() {
   return (
     <main style={{
       minHeight: '100vh',
-      background: 'radial-gradient(circle at 10% 10%, #ffffff 0%, #f3f1e9 35%, #ebe8dd 100%)',
+      background: 'var(--selecao-bg-gradient)',
       padding: '48px 20px',
       display: 'flex',
       alignItems: 'center',
@@ -71,11 +71,11 @@ export default function SelecaoUsuario() {
       <section style={{
         width: '100%',
         maxWidth: '980px',
-        background: 'rgba(255,255,255,0.85)',
-        border: '1px solid #dfddd4',
+        background: 'var(--selecao-card-bg)',
+        border: '1px solid var(--selecao-card-border)',
         borderRadius: '24px',
         padding: '28px',
-        boxShadow: '0 18px 40px rgba(30,30,28,0.08)',
+        boxShadow: 'var(--selecao-card-shadow)',
         backdropFilter: 'blur(3px)'
       }}>
         <div style={{ marginBottom: '36px', textAlign: 'center' }}>
@@ -83,7 +83,22 @@ export default function SelecaoUsuario() {
             fontFamily: "'Barlow Condensed', sans-serif", fontSize: '40px', fontWeight: 700,
             color: 'var(--cinza-800)', letterSpacing: '0.03em', marginBottom: '6px'
           }}>
-            <span style={{ color: 'var(--verde-principal)' }}>FÓRMULA</span> ENGENHARIA
+            <span style={{ color: 'var(--verde-principal)', display: 'flex', justifyContent: 'center' }}>
+              <img 
+              src="/banner.png" 
+              alt="Fórmula Engenharia"
+              style={{ width: '50%', height: 'auto' }}
+              onError={(e) => {
+              e.currentTarget.style.display = 'none'
+              if (e.currentTarget.parentElement) {
+                const fallback = e.currentTarget.parentElement.querySelector('.logo-fallback') as HTMLElement
+                if (fallback) fallback.style.display = 'block'
+              }
+              }}
+              />
+            </span>
+            <span className="logo-fallback" style={{ display: 'none' }}>Fórmula Engenharia</span>
+
           </h1>
           <p style={{ color: 'var(--cinza-600)', fontWeight: 500 }}>Sistema de Controle de Atividades</p>
         </div>
@@ -122,7 +137,7 @@ export default function SelecaoUsuario() {
         position: 'fixed',
         zIndex: -1,
         inset: 0,
-        background: 'radial-gradient(circle at 80% 10%, rgba(90,138,74,0.14), transparent 40%), radial-gradient(circle at 20% 90%, rgba(60,80,33,0.08), transparent 35%)'
+        background: 'var(--selecao-overlay-bg)'
       }} />
 
       <Modal
