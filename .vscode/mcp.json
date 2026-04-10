@@ -1,0 +1,11 @@
+{
+  "servers": {
+    "vexp": {
+      "type": "stdio",
+      "command": "/usr/lib/node_modules/vexp-cli/node_modules/@vexp/core-linux-x64/bin/vexp-core",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}

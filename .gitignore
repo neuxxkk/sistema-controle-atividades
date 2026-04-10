@@ -1,6 +1,5 @@
 # Logs
 *.log
-output.log
 
 # OS files
 .DS_Store

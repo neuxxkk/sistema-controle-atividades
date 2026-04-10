@@ -23,6 +23,8 @@ services:
       - "8000:8000"
     volumes:
       - ./api:/app
+      - ./api/alembic.ini:/app/alembic.ini
+      - ./api/alembic:/app/alembic
     depends_on:
       db:
         condition: service_healthy
