@@ -94,11 +94,6 @@ async def websocket_endpoint(websocket: WebSocket):
 async def root():
     return {"message": "Bem-vindo à API do Sistema de Controle de Atividades - Fórmula Engenharia"}
 
-# WebSocket endpoint (moved to dashboard router as per GEMINI.md, 
-# but keeping a redirect or simple handler here if needed)
-# Actually, GEMINI.md specifies /api/dashboard/ws/tempo-real
-# The dashboard router should handle it.
-
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

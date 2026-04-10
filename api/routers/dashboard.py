@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, WebSocket
+from typing import Optional, List
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
@@ -104,9 +105,13 @@ def _filtros_resposta(data_inicio: date, data_fim: date, usuario_id: int | None)
         "usuario_id": usuario_id,
     }
 
+
+def _nome_edificio_com_construtora(construtora_nome: str | None, edificio_nome: str) -> str:
+    return f"{construtora_nome} - {edificio_nome}" if construtora_nome else edificio_nome
+
 @router.get("/progresso")
 async def get_progresso(db: AsyncSession = Depends(get_db)):
-    query = select(models.Edificio)
+    query = select(models.Edificio).options(selectinload(models.Edificio.construtora))
     result = await db.execute(query)
     edificios = result.scalars().all()
     
@@ -117,7 +122,11 @@ async def get_progresso(db: AsyncSession = Depends(get_db)):
         laje_ids = lajes_result.scalars().all()
         
         if not laje_ids:
-            resultado.append({"id": ed.id, "nome": ed.nome, "percentual_conclusao": 0})
+            resultado.append({
+                "id": ed.id,
+                "nome": _nome_edificio_com_construtora(getattr(ed.construtora, "nome", None), ed.nome),
+                "percentual_conclusao": 0,
+            })
             continue
             
         total_query = select(func.count(models.Atividade.id)).where(models.Atividade.laje_id.in_(laje_ids))
@@ -130,7 +139,11 @@ async def get_progresso(db: AsyncSession = Depends(get_db)):
         concluidas = (await db.execute(concluidas_query)).scalar()
         
         percentual = (concluidas / total * 100) if total > 0 else 0
-        resultado.append({"id": ed.id, "nome": ed.nome, "percentual_conclusao": round(percentual, 1)})
+        resultado.append({
+            "id": ed.id,
+            "nome": _nome_edificio_com_construtora(getattr(ed.construtora, "nome", None), ed.nome),
+            "percentual_conclusao": round(percentual, 1),
+        })
         
     return resultado
 
@@ -351,6 +364,7 @@ async def get_horas_por_tarefa(
             models.Atividade.subtipo,
             models.Laje.tipo,
             models.Edificio.nome,
+            models.Construtora.nome,
             func.sum(models.SessaoTrabalho.duracao_segundos),
             func.count(models.SessaoTrabalho.id),
         )
@@ -358,6 +372,7 @@ async def get_horas_por_tarefa(
         .join(models.Atividade, models.Atividade.id == models.SessaoTrabalho.atividade_id)
         .join(models.Laje, models.Laje.id == models.Atividade.laje_id)
         .join(models.Edificio, models.Edificio.id == models.Laje.edificio_id)
+        .join(models.Construtora, models.Construtora.id == models.Edificio.construtora_id)
         .where(models.SessaoTrabalho.finalizado_em != None)
         .where(models.SessaoTrabalho.duracao_segundos != None)
         .where(models.SessaoTrabalho.duracao_segundos > 0)
@@ -377,6 +392,7 @@ async def get_horas_por_tarefa(
             models.Atividade.subtipo,
             models.Laje.tipo,
             models.Edificio.nome,
+            models.Construtora.nome,
         )
         .order_by(func.sum(models.SessaoTrabalho.duracao_segundos).desc())
         .offset(offset)
@@ -395,11 +411,11 @@ async def get_horas_por_tarefa(
             "atividade_id": atividade_id,
             "tarefa": f"{tipo}{f' - {subtipo}' if subtipo else ''}",
             "laje": laje_tipo,
-            "edificio": edificio_nome,
+            "edificio": _nome_edificio_com_construtora(construtora_nome, edificio_nome),
             "horas": round((total_seg or 0) / 3600, 2),
             "total_sessoes": int(total_sessoes or 0),
         }
-        for uid, usuario_nome, atividade_id, tipo, subtipo, laje_tipo, edificio_nome, total_seg, total_sessoes in linhas
+        for uid, usuario_nome, atividade_id, tipo, subtipo, laje_tipo, edificio_nome, construtora_nome, total_seg, total_sessoes in linhas
     ]
 
     payload = {
@@ -438,10 +454,12 @@ async def get_tempo_medio_por_edificio(
         select(
             models.Edificio.id,
             models.Edificio.nome,
+            models.Construtora.nome,
             func.avg(models.SessaoTrabalho.duracao_segundos),
             func.sum(models.SessaoTrabalho.duracao_segundos),
             func.count(models.SessaoTrabalho.id),
         )
+        .join(models.Construtora, models.Construtora.id == models.Edificio.construtora_id)
         .join(models.Laje, models.Laje.edificio_id == models.Edificio.id)
         .join(models.Atividade, models.Atividade.laje_id == models.Laje.id)
         .join(models.SessaoTrabalho, models.SessaoTrabalho.atividade_id == models.Atividade.id)
@@ -456,7 +474,7 @@ async def get_tempo_medio_por_edificio(
         base_query = base_query.where(models.SessaoTrabalho.usuario_id == usuario_id)
 
     query = (
-        base_query.group_by(models.Edificio.id, models.Edificio.nome)
+        base_query.group_by(models.Edificio.id, models.Edificio.nome, models.Construtora.nome)
         .order_by(func.avg(models.SessaoTrabalho.duracao_segundos).desc())
         .offset(offset)
         .limit(limit + 1)
@@ -470,12 +488,12 @@ async def get_tempo_medio_por_edificio(
     itens = [
         {
             "edificio_id": eid,
-            "edificio_nome": nome,
+            "edificio_nome": _nome_edificio_com_construtora(construtora_nome, nome),
             "tempo_medio_horas": round((avg_seg or 0) / 3600, 2),
             "total_horas": round((sum_seg or 0) / 3600, 2),
             "total_sessoes": int(total_sessoes or 0),
         }
-        for eid, nome, avg_seg, sum_seg, total_sessoes in linhas
+        for eid, nome, construtora_nome, avg_seg, sum_seg, total_sessoes in linhas
     ]
 
     payload = {
@@ -491,6 +509,7 @@ async def get_tempo_medio_por_tipo(
     data_inicio: date | None = None,
     data_fim: date | None = None,
     usuario_id: int | None = None,
+    edificio_id: int | None = None,
     limit: int = 20,
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
@@ -500,6 +519,7 @@ async def get_tempo_medio_por_tipo(
         data_inicio=data_inicio,
         data_fim=data_fim,
         usuario_id=usuario_id,
+        edificio_id=edificio_id,
         limit=limit,
         offset=offset,
     )
@@ -513,7 +533,7 @@ async def get_tempo_medio_por_tipo(
     base_query = (
         select(
             models.Atividade.tipo_elemento,
-            models.Atividade.subtipo,
+            models.Atividade.etapa_atual,
             func.avg(models.SessaoTrabalho.duracao_segundos),
             func.sum(models.SessaoTrabalho.duracao_segundos),
             func.count(models.SessaoTrabalho.id),
@@ -529,8 +549,16 @@ async def get_tempo_medio_por_tipo(
     if usuario_id is not None:
         base_query = base_query.where(models.SessaoTrabalho.usuario_id == usuario_id)
 
+    if edificio_id is not None:
+        base_query = (
+            base_query
+            .join(models.Laje, models.Laje.id == models.Atividade.laje_id)
+            .join(models.Edificio, models.Edificio.id == models.Laje.edificio_id)
+            .where(models.Edificio.id == edificio_id)
+        )
+
     query = (
-        base_query.group_by(models.Atividade.tipo_elemento, models.Atividade.subtipo)
+        base_query.group_by(models.Atividade.tipo_elemento, models.Atividade.etapa_atual)
         .order_by(func.avg(models.SessaoTrabalho.duracao_segundos).desc())
         .offset(offset)
         .limit(limit + 1)
@@ -544,12 +572,12 @@ async def get_tempo_medio_por_tipo(
     itens = [
         {
             "tipo_elemento": tipo,
-            "subtipo": subtipo,
+            "etapa_atual": etapa_atual,
             "tempo_medio_horas": round((avg_seg or 0) / 3600, 2),
             "total_horas": round((sum_seg or 0) / 3600, 2),
             "total_sessoes": int(total_sessoes or 0),
         }
-        for tipo, subtipo, avg_seg, sum_seg, total_sessoes in linhas
+        for tipo, etapa_atual, avg_seg, sum_seg, total_sessoes in linhas
     ]
 
     payload = {
@@ -636,13 +664,122 @@ async def get_tempo_medio_por_construtora(
     }
     return _cache_set(cache_key, payload)
 
+@router.get("/relatorio-produtividade")
+async def get_relatorio_produtividade(
+    edificio_id: Optional[int] = None,
+    status_ciclo: Optional[str] = None,
+    tipo_elemento: Optional[str] = None,
+    pavimento: Optional[List[str]] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Retorna o tempo total por atividade e a contribuição por funcionário.
+    Pode ser filtrado por edifício, status, tipo de elemento e múltiplos pavimentos.
+    """
+    # Lista de tipos que são únicos por edifício e não devem mostrar pavimento
+    TIPOS_UNICOS_EDIFICIO = ["GrelhaRefinada", "BlocosFundacao", "Cortinas", "Escada", "Rampa"]
+
+    query = (
+        select(
+            models.Atividade.id,
+            models.Edificio.nome.label("edificio"),
+            models.Construtora.nome.label("construtora"),
+            models.Laje.tipo.label("laje"),
+            models.Atividade.tipo_elemento,
+            models.Atividade.subtipo,
+            models.Atividade.status_ciclo,
+            models.Atividade.etapa_atual,
+            models.Atividade.etapa_total,
+            models.Usuario.nome.label("usuario"),
+            func.sum(models.SessaoTrabalho.duracao_segundos).label("segundos"),
+        )
+        .join(models.Laje, models.Laje.id == models.Atividade.laje_id)
+        .join(models.Edificio, models.Edificio.id == models.Laje.edificio_id)
+        .join(models.Construtora, models.Construtora.id == models.Edificio.construtora_id)
+        .outerjoin(models.SessaoTrabalho, models.SessaoTrabalho.atividade_id == models.Atividade.id)
+        .outerjoin(models.Usuario, models.Usuario.id == models.SessaoTrabalho.usuario_id)
+    )
+
+    if edificio_id:
+        query = query.where(models.Edificio.id == edificio_id)
+    if status_ciclo:
+        query = query.where(models.Atividade.status_ciclo == status_ciclo)
+    if tipo_elemento:
+        query = query.where(models.Atividade.tipo_elemento == tipo_elemento)
+    
+    if pavimento:
+        # Se selecionar '(Edifício)', inclui as tarefas únicas. 
+        # Se selecionar outros pavimentos, inclui as tarefas daqueles pavimentos que NÃO são únicas.
+        tem_geral = "(Edifício)" in pavimento
+        outros_pavimentos = [p for p in pavimento if p != "(Edifício)"]
+        
+        condicoes = []
+        if tem_geral:
+            condicoes.append(models.Atividade.tipo_elemento.in_(TIPOS_UNICOS_EDIFICIO))
+        if outros_pavimentos:
+            # Para pavimentos normais, pegamos tudo que NÃO é tipo único e está naquele pavimento
+            condicoes.append(
+                (models.Laje.tipo.in_(outros_pavimentos)) & 
+                (~models.Atividade.tipo_elemento.in_(TIPOS_UNICOS_EDIFICIO))
+            )
+        
+        if condicoes:
+            from sqlalchemy import or_
+            query = query.where(or_(*condicoes))
+
+    query = query.group_by(
+        models.Atividade.id, "edificio", "construtora", "laje", models.Usuario.id
+    ).order_by("edificio", "laje", models.Atividade.tipo_elemento)
+
+    result = await db.execute(query)
+    linhas = result.all()
+
+    # Agrupar por atividade
+    atividades = {}
+    for row in linhas:
+        key = str(row.id)
+        if key not in atividades:
+            # Se for tipo único do edifício, não associar a laje (pavimento)
+            pavimento = row.laje if row.tipo_elemento not in TIPOS_UNICOS_EDIFICIO else "— (Edifício)"
+            
+            atividades[key] = {
+                "id": row.id,
+                "edificio": _nome_edificio_com_construtora(row.construtora, row.edificio),
+                "laje": pavimento,
+                "tarefa": f"{row.tipo_elemento}{f' - {row.subtipo}' if row.subtipo else ''}",
+                "tipo_original": row.tipo_elemento,
+                "status": row.status_ciclo,
+                "etapa_atual": row.etapa_atual,
+                "etapa_total": row.etapa_total,
+                "tempo_total_seg": 0,
+                "contribuicoes": [],
+            }
+        
+        if row.usuario:
+            atividades[key]["tempo_total_seg"] += (row.segundos or 0)
+            atividades[key]["contribuicoes"].append({
+                "usuario": row.usuario,
+                "horas": round((row.segundos or 0) / 3600, 2)
+            })
+
+    # Formatar para lista e arredondar total
+    resultado = []
+    for ativ in atividades.values():
+        ativ["horas_totais"] = round(ativ["tempo_total_seg"] / 3600, 2)
+        resultado.append(ativ)
+
+    return resultado
+
 async def obter_payload_sessoes_ativas(db: AsyncSession):
     query = (
         select(models.SessaoTrabalho)
         .where(models.SessaoTrabalho.finalizado_em == None)
         .options(
             selectinload(models.SessaoTrabalho.usuario),
-            selectinload(models.SessaoTrabalho.atividade).selectinload(models.Atividade.laje).selectinload(models.Laje.edificio)
+            selectinload(models.SessaoTrabalho.atividade)
+            .selectinload(models.Atividade.laje)
+            .selectinload(models.Laje.edificio)
+            .selectinload(models.Edificio.construtora)
         )
     )
     result = await db.execute(query)
@@ -655,7 +792,10 @@ async def obter_payload_sessoes_ativas(db: AsyncSession):
             "usuario_nome": s.usuario.nome,
             "atividade_id": s.atividade_id,
             "atividade_descricao": f"{s.atividade.tipo_elemento} — {s.atividade.subtipo or ''}".strip(' — '),
-            "edificio_nome": s.atividade.laje.edificio.nome,
+            "edificio_nome": _nome_edificio_com_construtora(
+                getattr(s.atividade.laje.edificio.construtora, "nome", None),
+                s.atividade.laje.edificio.nome,
+            ),
             "laje_tipo": s.atividade.laje.tipo,
             "iniciado_em": s.iniciado_em.isoformat()
         })

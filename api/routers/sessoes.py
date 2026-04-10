@@ -19,6 +19,8 @@ def _sessao_relacoes():
         .selectinload(models.Atividade.laje)
         .selectinload(models.Laje.edificio)
         .selectinload(models.Edificio.construtora),
+        selectinload(models.SessaoTrabalho.atividade)
+        .selectinload(models.Atividade.usuario_responsavel),
     )
 
 @router.get("/status-atual", response_model=Optional[schemas.SessaoTrabalho])
