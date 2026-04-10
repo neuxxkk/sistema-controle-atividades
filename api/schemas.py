@@ -29,6 +29,53 @@ class Usuario(UsuarioBase):
     criado_em: datetime
     model_config = ConfigDict(from_attributes=True)
 
+
+class VinculoMaquinaBase(BaseModel):
+    nome_dispositivo: str
+    ip: str
+    windows_username: str
+
+
+class VinculoMaquina(VinculoMaquinaBase):
+    id: int
+    usuario_id: int
+    criado_em: datetime
+    atualizado_em: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class VinculoMaquinaHistorico(BaseModel):
+    id: int
+    usuario_id: int
+    admin_id: Optional[int] = None
+    acao: str
+    nome_dispositivo_antes: Optional[str] = None
+    ip_antes: Optional[str] = None
+    windows_username_antes: Optional[str] = None
+    nome_dispositivo_depois: str
+    ip_depois: str
+    windows_username_depois: str
+    criado_em: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PrimeiroAcessoRequest(VinculoMaquinaBase):
+    nome_completo: str
+    confirmar_maquina_anterior: bool = False
+
+
+class AlterarVinculoMaquinaRequest(VinculoMaquinaBase):
+    admin_id: int
+
+
+class UsuarioComVinculo(BaseModel):
+    usuario: Usuario
+    vinculo_maquina: Optional[VinculoMaquina] = None
+
+
+class PrimeiroAcessoResponse(UsuarioComVinculo):
+    primeiro_acesso: bool
+
 # --- Construtora ---
 class ConstrutoraBase(BaseModel):
     nome: str

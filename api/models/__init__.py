@@ -5,3 +5,5 @@ from .laje import Laje
 from .atividade import Atividade
 from .status_historico import StatusHistorico
 from .sessao_trabalho import SessaoTrabalho
+from .vinculo_maquina import VinculoMaquina
+from .vinculo_maquina_historico import VinculoMaquinaHistorico

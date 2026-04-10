@@ -16,6 +16,8 @@ class Usuario(Base):
     atividades_responsaveis = relationship("Atividade", back_populates="usuario_responsavel")
     historicos = relationship("StatusHistorico", back_populates="usuario")
     sessoes = relationship("SessaoTrabalho", back_populates="usuario")
+    vinculo_maquina = relationship("VinculoMaquina", back_populates="usuario", uselist=False, cascade="all, delete-orphan")
+    historicos_vinculo_maquina = relationship("VinculoMaquinaHistorico", back_populates="usuario", foreign_keys="VinculoMaquinaHistorico.usuario_id", cascade="all, delete-orphan")
     
     __table_args__ = (
         CheckConstraint(role.in_(['funcionario', 'admin']), name='check_role'),
