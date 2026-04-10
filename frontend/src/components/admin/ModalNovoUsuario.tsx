@@ -121,7 +121,7 @@ export function ModalNovoUsuario({ isOpen, onClose, onSuccess, usuarioEdicao }: 
                 name="role"
                 value="funcionario"
                 checked={formData.role === 'funcionario'}
-                onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                onChange={(e) => setFormData({ ...formData, role: e.target.value as 'funcionario' | 'admin' })}
               />
               Funcionário
             </label>
@@ -131,7 +131,7 @@ export function ModalNovoUsuario({ isOpen, onClose, onSuccess, usuarioEdicao }: 
                 name="role"
                 value="admin"
                 checked={formData.role === 'admin'}
-                onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                onChange={(e) => setFormData({ ...formData, role: e.target.value as 'funcionario' | 'admin' })}
               />
               Administrador
             </label>

@@ -121,7 +121,7 @@ export default function UsuariosAdminPage() {
             {carregando ? (
               <tr><td colSpan={5} style={{ padding: '32px', textAlign: 'center' }}>Carregando usuários...</td></tr>
             ) : usuarios.length === 0 ? (
-              <tr><td colSpan={5} style={{ padding: '32px', textAlign: 'center', color: 'var(--cinza-300)' }}>Nenhum usuário cadastrado.</td></tr>
+              <tr><td colSpan={5} style={{ padding: '32px', textAlign: 'center', color: 'var(--texto-secundario)' }}>Nenhum usuário cadastrado.</td></tr>
             ) : usuarios.map(u => (
               <tr key={u.id} style={{ borderBottom: '1px solid var(--cinza-100)', transition: 'background 160ms ease' }}>
                 <td style={{ padding: 'var(--tabela-padding)', color: 'var(--texto-secundario)' }}>#{u.id}</td>

@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { api } from '@/lib/api'
+import { formatarNomeEdificio } from '@/lib/constants'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { RelatorioProdutividadeTabela } from '@/components/admin/RelatorioProdutividadeTabela'
 import { useToast } from '@/context/ToastContext'
@@ -157,7 +158,7 @@ export default function RelatorioProdutividadePage() {
                 style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--cinza-300)', background: 'var(--cinza-50)', fontSize: '14px', outline: 'none', fontWeight: 600 }}
               >
                 {edificios.map(ed => (
-                  <option key={ed.id} value={ed.id}>{ed.nome}</option>
+                  <option key={ed.id} value={ed.id}>{formatarNomeEdificio(ed)}</option>
                 ))}
               </select>
             </div>
@@ -300,7 +301,7 @@ export default function RelatorioProdutividadePage() {
         ) : (
           <RelatorioProdutividadeTabela 
             dados={dados} 
-            nomeEdificio={edificios.find(ed => ed.id === edificioId)?.nome || ''} 
+            nomeEdificio={formatarNomeEdificio(edificios.find(ed => ed.id === edificioId), '')} 
           />
         )}
       </div>

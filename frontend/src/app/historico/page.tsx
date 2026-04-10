@@ -4,7 +4,7 @@ import { api } from '@/lib/api'
 import { useUsuarioLocal } from '@/hooks/useUsuarioLocal'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { formatarDuracao, formatarData } from '@/lib/formatters'
-import { formatarTipoElemento, nomeEtapa } from '@/lib/constants'
+import { formatarNomeEdificio, formatarTipoElemento, nomeEtapa } from '@/lib/constants'
 import type { SessaoTrabalho } from '@/types'
 
 export default function HistoricoPage() {
@@ -27,7 +27,7 @@ export default function HistoricoPage() {
     const map = new Map<string, string>()
     sessoes.forEach(s => {
       const ed = s.atividade?.laje?.edificio
-      if (ed) map.set(String(ed.id), ed.nome)
+      if (ed) map.set(String(ed.id), formatarNomeEdificio(ed))
     })
     return Array.from(map.entries()).map(([id, nome]) => ({ id, nome }))
   }, [sessoes])

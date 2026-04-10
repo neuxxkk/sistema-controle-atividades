@@ -61,14 +61,14 @@
   --acao-neutra-bg:        #2f3230;
   --acao-neutra-texto:     #ffffff;
 
-  /* Sidebar (fixa em tom escuro, independente do tema) */
-  --sidebar-bg:            #1b1d1b;
-  --sidebar-bg-elevada:    #232622;
-  --sidebar-texto:         #f1efe8;
-  --sidebar-texto-sec:     #c3bfb3;
-  --sidebar-texto-muted:   #9b9688;
-  --sidebar-borda:         rgba(255, 255, 255, 0.08);
-  --sidebar-hover:         rgba(255, 255, 255, 0.06);
+  /* Sidebar (tema claro) */
+  --sidebar-bg:            #f4f2ec;
+  --sidebar-bg-elevada:    #ffffff;
+  --sidebar-texto:         #2c2c2a;
+  --sidebar-texto-sec:     #5d5b53;
+  --sidebar-texto-muted:   #7d7b73;
+  --sidebar-borda:         rgba(44, 44, 42, 0.14);
+  --sidebar-hover:         rgba(44, 44, 42, 0.06);
 
   /* Tela de seleção de usuário */
   --selecao-bg-gradient:    radial-gradient(circle at 10% 10%, #ffffff 0%, #f3f1e9 35%, #ebe8dd 100%);
@@ -125,7 +125,7 @@
   --acao-neutra-bg:        #353a36;
   --acao-neutra-texto:     #f4f2ec;
 
-  /* Mantém contraste da sidebar estável no dark */
+  /* Sidebar (tema escuro) */
   --sidebar-bg:            #171a17;
   --sidebar-bg-elevada:    #202420;
   --sidebar-texto:         #f1efe8;
@@ -222,6 +222,11 @@ input[type="date"] {
 @keyframes toast-in {
   from { transform: translateX(20px); opacity: 0; }
   to   { transform: translateX(0);    opacity: 1; }
+}
+
+@keyframes pulsar {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(90,138,74,0.5); }
+  50%       { box-shadow: 0 0 0 4px rgba(90,138,74,0); }
 }
 
 @media (prefers-reduced-motion: reduce) {

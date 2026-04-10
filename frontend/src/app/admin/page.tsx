@@ -2,13 +2,15 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { api } from '@/lib/api'
-import { API_BASE } from '@/lib/constants'
+import { API_BASE, nomeEtapa, formatarTipoElemento, formatarLaje } from '@/lib/constants'
 import { useToast } from '@/context/ToastContext'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { GraficoProgresso } from '@/components/admin/GraficoProgresso'
+import { ModalDetalheEdificio } from '@/components/admin/ModalDetalheEdificio'
+import { ModalDetalheAtividade } from '@/components/atividades/ModalDetalheAtividade'
 import { useWebSocket } from '@/hooks/useWebSocket'
-import { Building2, Users, Building, Clock3, Timer } from 'lucide-react'
-import type { Usuario } from '@/types'
+import { Building2, Users, Building, Clock3, Timer, FileSpreadsheet } from 'lucide-react'
+import type { Usuario, EdificioDetalhe, AtividadeDetalhe } from '@/types'
 
 interface SessaoAtivaWS {
   usuario_id: number
@@ -37,7 +39,6 @@ interface HorasUsuarioItem {
 
 interface HorasTrabalhadasResponse {
   filtros: {
-    granularidade: 'dia' | 'semana' | 'mes'
     data_inicio: string
     data_fim: string
     usuario_id: number | null
@@ -62,15 +63,7 @@ interface TempoMedioItemEdificio {
 
 interface TempoMedioItemTipo {
   tipo_elemento: string
-  subtipo: string | null
-  tempo_medio_horas: number
-  total_horas: number
-  total_sessoes: number
-}
-
-interface TempoMedioItemConstrutora {
-  construtora_id: number
-  construtora_nome: string
+  etapa_atual: number
   tempo_medio_horas: number
   total_horas: number
   total_sessoes: number
@@ -142,10 +135,9 @@ function obterIntervaloDoMes(mesRef: string) {
 
 export default function AdminDashboard() {
   const { addToast } = useToast()
-  const [progresso, setProgresso] = useState([])
-  const [produtividade, setProdutividade] = useState([])
+  const [progresso, setProgresso] = useState<any[]>([])
+  const [produtividade, setProdutividade] = useState<any[]>([])
   const [usuariosFiltro, setUsuariosFiltro] = useState<Usuario[]>([])
-  const [granularidade, setGranularidade] = useState<'dia' | 'semana' | 'mes'>('mes')
   const [usuarioIdFiltro, setUsuarioIdFiltro] = useState<number | 'todos'>('todos')
   const mesAtual = formatarMesInput(new Date())
   const intervaloInicial = obterIntervaloDoMes(mesAtual)
@@ -157,13 +149,10 @@ export default function AdminDashboard() {
   const [carregandoRelatorio, setCarregandoRelatorio] = useState(false)
   const [tempoMedioEdificios, setTempoMedioEdificios] = useState<TempoMedioItemEdificio[]>([])
   const [tempoMedioTipos, setTempoMedioTipos] = useState<TempoMedioItemTipo[]>([])
-  const [tempoMedioConstrutoras, setTempoMedioConstrutoras] = useState<TempoMedioItemConstrutora[]>([])
   const [offsetEdificios, setOffsetEdificios] = useState(0)
   const [offsetTipos, setOffsetTipos] = useState(0)
-  const [offsetConstrutoras, setOffsetConstrutoras] = useState(0)
   const [metaEdificios, setMetaEdificios] = useState({ limit: 5, offset: 0, total_itens: 0, has_more: false })
   const [metaTipos, setMetaTipos] = useState({ limit: 5, offset: 0, total_itens: 0, has_more: false })
-  const [metaConstrutoras, setMetaConstrutoras] = useState({ limit: 5, offset: 0, total_itens: 0, has_more: false })
   const [carregandoTemposMedios, setCarregandoTemposMedios] = useState(false)
   const [tarefasFuncionario, setTarefasFuncionario] = useState<HorasPorTarefaItem[]>([])
   const [offsetTarefasFuncionario, setOffsetTarefasFuncionario] = useState(0)
@@ -172,6 +161,32 @@ export default function AdminDashboard() {
   const { data: wsData } = useWebSocket<PayloadWS>(`${API_BASE}/dashboard/ws/tempo-real`)
   const LIMIT_TEMPOS_MEDIOS = 5
   const LIMIT_TAREFAS = 8
+  const [detalheEdificio, setDetalheEdificio] = useState<EdificioDetalhe | null>(null)
+  const [detalheEdificioAberto, setDetalheEdificioAberto] = useState(false)
+  const [detalheAtividade, setDetalheAtividade] = useState<AtividadeDetalhe | null>(null)
+  const [detalheAtividadeAberto, setDetalheAtividadeAberto] = useState(false)
+  const [usuarioIdTemposMedios, setUsuarioIdTemposMedios] = useState<number | 'todos'>('todos')
+  const [edificioIdTipos, setEdificioIdTipos] = useState<number | 'todos'>('todos')
+
+  const abrirDetalheEdificio = async (edificioId: number) => {
+    try {
+      const data = await api.get<EdificioDetalhe>(`/edificios/${edificioId}/detalhe`)
+      setDetalheEdificio(data)
+      setDetalheEdificioAberto(true)
+    } catch (e: any) {
+      addToast(e?.message || 'Erro ao carregar detalhes do edifício', 'erro')
+    }
+  }
+
+  const abrirDetalheAtividade = async (atividadeId: number) => {
+    try {
+      const data = await api.get<AtividadeDetalhe>(`/atividades/${atividadeId}/detalhe`)
+      setDetalheAtividade(data)
+      setDetalheAtividadeAberto(true)
+    } catch (e: any) {
+      addToast(e?.message || 'Erro ao carregar detalhes da tarefa', 'erro')
+    }
+  }
 
   const aplicarMesReferencia = (mes: string) => {
     const intervalo = obterIntervaloDoMes(mes)
@@ -184,7 +199,6 @@ export default function AdminDashboard() {
     setCarregandoRelatorio(true)
     try {
       const params = new URLSearchParams({
-        granularidade,
         data_inicio: dataInicio,
         data_fim: dataFim,
       })
@@ -214,37 +228,29 @@ export default function AdminDashboard() {
   const carregarTemposMedios = async () => {
     setCarregandoTemposMedios(true)
     try {
-      const params = new URLSearchParams({
+      const base = new URLSearchParams({
         data_inicio: dataInicio,
         data_fim: dataFim,
         limit: String(LIMIT_TEMPOS_MEDIOS),
       })
+      if (usuarioIdTemposMedios !== 'todos') base.set('usuario_id', String(usuarioIdTemposMedios))
 
-      if (usuarioIdFiltro !== 'todos') {
-        params.set('usuario_id', String(usuarioIdFiltro))
-      }
-
-      const paramsEdificios = new URLSearchParams(params)
+      const paramsEdificios = new URLSearchParams(base)
       paramsEdificios.set('offset', String(offsetEdificios))
 
-      const paramsTipos = new URLSearchParams(params)
+      const paramsTipos = new URLSearchParams(base)
       paramsTipos.set('offset', String(offsetTipos))
+      if (edificioIdTipos !== 'todos') paramsTipos.set('edificio_id', String(edificioIdTipos))
 
-      const paramsConstrutoras = new URLSearchParams(params)
-      paramsConstrutoras.set('offset', String(offsetConstrutoras))
-
-      const [edificios, tipos, construtoras] = await Promise.all([
+      const [edificios, tipos] = await Promise.all([
         api.get<TempoMedioResponse<TempoMedioItemEdificio>>(`/dashboard/tempo-medio/edificios?${paramsEdificios.toString()}`),
         api.get<TempoMedioResponse<TempoMedioItemTipo>>(`/dashboard/tempo-medio/tipos?${paramsTipos.toString()}`),
-        api.get<TempoMedioResponse<TempoMedioItemConstrutora>>(`/dashboard/tempo-medio/construtoras?${paramsConstrutoras.toString()}`),
       ])
 
       setTempoMedioEdificios(edificios.itens)
       setTempoMedioTipos(tipos.itens)
-      setTempoMedioConstrutoras(construtoras.itens)
       setMetaEdificios(edificios.meta)
       setMetaTipos(tipos.meta)
-      setMetaConstrutoras(construtoras.meta)
     } catch (e: any) {
       addToast(e?.message || 'Erro ao carregar tempos médios', 'erro')
     } finally {
@@ -296,7 +302,7 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     carregarHorasTrabalhadas()
-  }, [granularidade, usuarioIdFiltro, dataInicio, dataFim])
+  }, [usuarioIdFiltro, dataInicio, dataFim])
 
   useEffect(() => {
     carregarKpisExecutivo()
@@ -304,7 +310,7 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     carregarTemposMedios()
-  }, [usuarioIdFiltro, dataInicio, dataFim, offsetEdificios, offsetTipos, offsetConstrutoras])
+  }, [usuarioIdTemposMedios, edificioIdTipos, dataInicio, dataFim, offsetEdificios, offsetTipos])
 
   useEffect(() => {
     carregarHorasPorTarefa()
@@ -313,12 +319,15 @@ export default function AdminDashboard() {
   useEffect(() => {
     setOffsetEdificios(0)
     setOffsetTipos(0)
-    setOffsetConstrutoras(0)
     setOffsetTarefasFuncionario(0)
   }, [usuarioIdFiltro, dataInicio, dataFim])
 
+  useEffect(() => {
+    setOffsetEdificios(0)
+    setOffsetTipos(0)
+  }, [usuarioIdTemposMedios, edificioIdTipos])
+
   const sessoesAtivas = wsData?.dados || []
-  const maxHorasSerie = Math.max(...(horasRelatorio?.serie.map(s => s.horas) || [0]))
 
   return (
     <>
@@ -349,6 +358,17 @@ export default function AdminDashboard() {
               </span>
             </Link>
 
+            <Link href="/admin/relatorios/produtividade" style={{
+              background: 'var(--superficie-1)', border: '1px solid var(--cinza-300)', borderRadius: '8px',
+              padding: '14px 16px', textDecoration: 'none', color: 'var(--cinza-800)',
+              display: 'flex', alignItems: 'center', gap: '10px'
+            }}>
+              <FileSpreadsheet size={18} color="var(--verde-principal)" />
+              <span style={{ fontFamily: "'Barlow Condensed', sans-serif", textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 }}>
+                Relatórios Detalhados
+              </span>
+            </Link>
+
             <Link href="/admin/construtoras" style={{
               background: 'var(--superficie-1)', border: '1px solid var(--cinza-300)', borderRadius: '8px',
               padding: '14px 16px', textDecoration: 'none', color: 'var(--cinza-800)',
@@ -370,6 +390,7 @@ export default function AdminDashboard() {
                 Usuários
               </span>
             </Link>
+
           </div>
         </section>
         
@@ -396,8 +417,8 @@ export default function AdminDashboard() {
                 <div style={{ fontSize: '13px', color: 'var(--cinza-600)' }}>
                   Trabalhando em: <strong style={{ color: 'var(--verde-principal)' }}>{s.atividade_descricao}</strong>
                 </div>
-                <div style={{ fontSize: '12px', color: 'var(--cinza-300)', textTransform: 'uppercase', fontWeight: 600 }}>
-                  {s.laje_tipo} · {s.edificio_nome}
+                <div style={{ fontSize: '12px', color: 'var(--texto-secundario)', textTransform: 'uppercase', fontWeight: 600 }}>
+                  {formatarLaje(s.laje_tipo)} · {s.edificio_nome}
                 </div>
               </div>
             ))}
@@ -406,7 +427,7 @@ export default function AdminDashboard() {
               <div style={{ 
                 gridColumn: '1/-1', padding: '32px', textAlign: 'center', 
                 background: 'var(--cinza-50)', border: '1px dashed var(--cinza-300)', borderRadius: '8px',
-                color: 'var(--cinza-300)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em'
+                color: 'var(--texto-secundario)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em'
               }}>
                 Ninguém trabalhando no momento
               </div>
@@ -503,7 +524,13 @@ export default function AdminDashboard() {
                 ) : (
                   <div style={{ maxHeight: '260px', overflowY: 'auto' }}>
                     {tarefasFuncionario.map(item => (
-                      <div key={`${item.usuario_id}-${item.atividade_id}`} style={{ padding: '10px 12px', borderTop: '1px solid var(--cinza-100)', display: 'grid', gridTemplateColumns: '1fr auto', gap: '8px' }}>
+                      <div
+                        key={`${item.usuario_id}-${item.atividade_id}`}
+                        onClick={() => abrirDetalheAtividade(item.atividade_id)}
+                        style={{ padding: '10px 12px', borderTop: '1px solid var(--cinza-100)', display: 'grid', gridTemplateColumns: '1fr auto', gap: '8px', cursor: 'pointer', transition: 'background 150ms' }}
+                        onMouseEnter={e => (e.currentTarget.style.background = 'var(--cinza-50)')}
+                        onMouseLeave={e => (e.currentTarget.style.background = '')}
+                      >
                         <div>
                           <div style={{ fontWeight: 600, color: 'var(--cinza-800)' }}>{item.usuario_nome}</div>
                           <div style={{ fontSize: '12px', color: 'var(--cinza-600)' }}>{item.tarefa} • {item.edificio} • {item.laje}</div>
@@ -515,61 +542,46 @@ export default function AdminDashboard() {
                     ))}
                   </div>
                 )}
-                <div style={{ borderTop: '1px solid var(--cinza-100)', padding: '10px 12px', display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
-                  <button
-                    onClick={() => setOffsetTarefasFuncionario(Math.max(0, offsetTarefasFuncionario - LIMIT_TAREFAS))}
-                    disabled={offsetTarefasFuncionario === 0}
-                    style={{ border: '1px solid var(--cinza-300)', background: 'var(--superficie-1)', borderRadius: '6px', padding: '6px 10px', cursor: offsetTarefasFuncionario === 0 ? 'not-allowed' : 'pointer', opacity: offsetTarefasFuncionario === 0 ? 0.5 : 1 }}
-                  >
-                    Anterior
-                  </button>
-                  <button
-                    onClick={() => setOffsetTarefasFuncionario(offsetTarefasFuncionario + LIMIT_TAREFAS)}
-                    disabled={!metaTarefasFuncionario.has_more}
-                    style={{ border: '1px solid var(--cinza-300)', background: 'var(--superficie-1)', borderRadius: '6px', padding: '6px 10px', cursor: !metaTarefasFuncionario.has_more ? 'not-allowed' : 'pointer', opacity: !metaTarefasFuncionario.has_more ? 0.5 : 1 }}
-                  >
-                    Próxima
-                  </button>
-                </div>
-              </div>
-
-              <div style={{ border: '1px solid var(--cinza-100)', borderRadius: '8px', overflow: 'hidden' }}>
-                <div style={{ background: 'var(--cinza-50)', padding: '10px 12px', fontFamily: "'Barlow Condensed', sans-serif", textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700, fontSize: '12px', color: 'var(--cinza-600)' }}>
-                  Série temporal (isolada)
-                </div>
-                <div style={{ padding: '10px 12px', borderTop: '1px solid var(--cinza-100)', borderBottom: '1px solid var(--cinza-100)', background: 'var(--superficie-1)' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: '10px', alignItems: 'center' }}>
-                    <div>
-                      <label style={{ display: 'block', marginBottom: '4px', fontSize: '11px', textTransform: 'uppercase', color: 'var(--cinza-600)', fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: '0.06em', fontWeight: 700 }}>
-                        Granularidade da série
-                      </label>
-                      <select value={granularidade} onChange={(e) => setGranularidade(e.target.value as 'dia' | 'semana' | 'mes')} style={{ width: '100%', padding: '8px 10px', border: '1px solid var(--cinza-300)', borderRadius: '6px', background: 'var(--superficie-1)' }}>
-                        <option value="dia">Dia</option>
-                        <option value="semana">Semana</option>
-                        <option value="mes">Mês</option>
-                      </select>
-                    </div>
-                    <div style={{ fontSize: '12px', color: 'var(--cinza-600)' }}>
-                      Esta granularidade afeta somente a série temporal abaixo.
-                    </div>
-                  </div>
-                </div>
-
-                {horasRelatorio.serie.length === 0 ? (
-                  <div style={{ padding: '14px', color: 'var(--cinza-600)' }}>Sem dados no período selecionado.</div>
-                ) : (
-                  <div style={{ maxHeight: '220px', overflowY: 'auto' }}>
-                    {horasRelatorio.serie.map(item => (
-                      <div key={item.periodo} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', borderTop: '1px solid var(--cinza-100)' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
-                          <span style={{ color: 'var(--cinza-800)', minWidth: '78px' }}>{item.periodo}</span>
-                          <div style={{ height: '8px', borderRadius: '999px', background: 'var(--cinza-100)', flex: 1, overflow: 'hidden' }}>
-                            <div style={{ height: '100%', width: `${maxHorasSerie > 0 ? (item.horas / maxHorasSerie) * 100 : 0}%`, background: 'var(--verde-principal)' }} />
-                          </div>
-                        </div>
-                        <span style={{ fontFamily: "'JetBrains Mono', monospace", color: 'var(--verde-principal)', fontWeight: 600 }}>{item.horas.toFixed(2)}h</span>
-                      </div>
-                    ))}
+                {(offsetTarefasFuncionario > 0 || metaTarefasFuncionario.has_more) && (
+                  <div style={{ borderTop: '1px solid var(--cinza-100)', padding: '10px 12px', display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                    <button
+                      onClick={() => setOffsetTarefasFuncionario(Math.max(0, offsetTarefasFuncionario - LIMIT_TAREFAS))}
+                      disabled={offsetTarefasFuncionario === 0}
+                      style={{ 
+                        border: '1px solid var(--cinza-300)', 
+                        background: 'var(--superficie-1)', 
+                        borderRadius: '6px', 
+                        padding: '6px 10px', 
+                        cursor: offsetTarefasFuncionario === 0 ? 'not-allowed' : 'pointer', 
+                        opacity: offsetTarefasFuncionario === 0 ? 0.5 : 1,
+                        fontSize: '12px',
+                        color: 'var(--cinza-800)',
+                        fontFamily: "'Barlow Condensed', sans-serif",
+                        fontWeight: 600,
+                        textTransform: 'uppercase'
+                      }}
+                    >
+                      Anterior
+                    </button>
+                    <button
+                      onClick={() => setOffsetTarefasFuncionario(offsetTarefasFuncionario + LIMIT_TAREFAS)}
+                      disabled={!metaTarefasFuncionario.has_more}
+                      style={{ 
+                        border: '1px solid var(--cinza-300)', 
+                        background: 'var(--superficie-1)', 
+                        borderRadius: '6px', 
+                        padding: '6px 10px', 
+                        cursor: !metaTarefasFuncionario.has_more ? 'not-allowed' : 'pointer', 
+                        opacity: !metaTarefasFuncionario.has_more ? 0.5 : 1,
+                        fontSize: '12px',
+                        color: 'var(--cinza-800)',
+                        fontFamily: "'Barlow Condensed', sans-serif",
+                        fontWeight: 600,
+                        textTransform: 'uppercase'
+                      }}
+                    >
+                      Próxima
+                    </button>
                   </div>
                 )}
               </div>
@@ -578,115 +590,189 @@ export default function AdminDashboard() {
         </section>
 
         <section style={{ background: 'var(--superficie-1)', border: '1px solid var(--cinza-300)', borderRadius: '10px', padding: '16px' }}>
-          <h2 style={{
-            fontFamily: "'Barlow Condensed', sans-serif", fontSize: '14px',
-            fontWeight: 700, color: 'var(--cinza-600)', textTransform: 'uppercase',
-            letterSpacing: '0.1em', marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px'
-          }}>
-            <Timer size={16} color="var(--verde-principal)" />
-            Tempos médios (Fase B)
-          </h2>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', marginBottom: '14px' }}>
+            <div>
+              <h2 style={{
+                fontFamily: "'Barlow Condensed', sans-serif", fontSize: '14px',
+                fontWeight: 700, color: 'var(--cinza-600)', textTransform: 'uppercase',
+                letterSpacing: '0.1em', margin: 0, display: 'flex', alignItems: 'center', gap: '8px'
+              }}>
+                <Timer size={16} color="var(--verde-principal)" />
+                Tempo médio gasto por sessão de trabalho
+              </h2>
+              <p style={{ margin: '4px 0 0', fontSize: '11px', color: 'var(--cinza-400)' }}>
+                Média de duração por sessão fechada no período — agrupado por edifício e por tipo/etapa de tarefa.
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '10px', textTransform: 'uppercase', color: 'var(--cinza-500)', fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: '0.06em', fontWeight: 700, marginBottom: '2px' }}>
+                  Funcionário
+                </label>
+                <select
+                  value={usuarioIdTemposMedios}
+                  onChange={e => setUsuarioIdTemposMedios(e.target.value === 'todos' ? 'todos' : Number(e.target.value))}
+                  style={{ padding: '6px 8px', border: '1px solid var(--cinza-300)', borderRadius: '6px', fontSize: '12px', background: 'var(--superficie-1)' }}
+                >
+                  <option value="todos">Todos</option>
+                  {usuariosFiltro.map(u => <option key={u.id} value={u.id}>{u.nome}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '10px', textTransform: 'uppercase', color: 'var(--cinza-500)', fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: '0.06em', fontWeight: 700, marginBottom: '2px' }}>
+                  Edifício (tarefas)
+                </label>
+                <select
+                  value={edificioIdTipos}
+                  onChange={e => setEdificioIdTipos(e.target.value === 'todos' ? 'todos' : Number(e.target.value))}
+                  style={{ padding: '6px 8px', border: '1px solid var(--cinza-300)', borderRadius: '6px', fontSize: '12px', background: 'var(--superficie-1)' }}
+                >
+                  <option value="todos">Todos</option>
+                  {progresso.map((ed: any) => <option key={ed.id} value={ed.id}>{ed.nome}</option>)}
+                </select>
+              </div>
+            </div>
+          </div>
 
           {carregandoTemposMedios ? (
             <div style={{ padding: '20px', textAlign: 'center', color: 'var(--cinza-600)' }}>Carregando tempos médios...</div>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px' }}>
               <div style={{ border: '1px solid var(--cinza-100)', borderRadius: '8px', overflow: 'hidden' }}>
-                <div style={{ background: 'var(--cinza-50)', padding: '10px 12px', fontFamily: "'Barlow Condensed', sans-serif", textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700, fontSize: '12px', color: 'var(--cinza-600)' }}>
-                  Por edifício
+                <div style={{ background: 'var(--cinza-50)', padding: '10px 12px' }}>
+                  <div style={{ fontFamily: "'Barlow Condensed', sans-serif", textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700, fontSize: '12px', color: 'var(--cinza-600)' }}>
+                    Por edifício
+                  </div>
+                  <div style={{ fontSize: '10px', color: 'var(--cinza-400)', marginTop: '2px' }}>tempo médio/sessão por edifício</div>
                 </div>
                 {tempoMedioEdificios.length === 0 ? (
                   <div style={{ padding: '12px', color: 'var(--cinza-600)' }}>Sem dados para o período.</div>
                 ) : tempoMedioEdificios.map(item => (
-                  <div key={item.edificio_id} style={{ borderTop: '1px solid var(--cinza-100)', padding: '10px 12px', display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
+                  <div
+                    key={item.edificio_id}
+                    onClick={() => abrirDetalheEdificio(item.edificio_id)}
+                    style={{ borderTop: '1px solid var(--cinza-100)', padding: '10px 12px', display: 'flex', justifyContent: 'space-between', gap: '10px', cursor: 'pointer', transition: 'background 150ms' }}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--cinza-50)')}
+                    onMouseLeave={e => (e.currentTarget.style.background = '')}
+                  >
                     <div style={{ color: 'var(--cinza-800)' }}>{item.edificio_nome}</div>
-                    <div style={{ textAlign: 'right', fontFamily: "'JetBrains Mono', monospace", color: 'var(--verde-principal)', fontWeight: 600 }}>
+                    <div style={{ textAlign: 'right', fontFamily: "'JetBrains Mono', monospace", color: 'var(--verde-principal)', fontWeight: 600, whiteSpace: 'nowrap' }}>
                       {item.tempo_medio_horas.toFixed(2)}h
+                      <div style={{ fontSize: '10px', color: 'var(--cinza-400)', fontFamily: 'inherit', fontWeight: 400 }}>média/sessão</div>
                     </div>
                   </div>
                 ))}
-                <div style={{ borderTop: '1px solid var(--cinza-100)', padding: '10px 12px', display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
-                  <button
-                    onClick={() => setOffsetEdificios(Math.max(0, offsetEdificios - LIMIT_TEMPOS_MEDIOS))}
-                    disabled={offsetEdificios === 0}
-                    style={{ border: '1px solid var(--cinza-300)', background: 'var(--superficie-1)', borderRadius: '6px', padding: '6px 10px', cursor: offsetEdificios === 0 ? 'not-allowed' : 'pointer', opacity: offsetEdificios === 0 ? 0.5 : 1 }}
-                  >
-                    Anterior
-                  </button>
-                  <button
-                    onClick={() => setOffsetEdificios(offsetEdificios + LIMIT_TEMPOS_MEDIOS)}
-                    disabled={!metaEdificios.has_more}
-                    style={{ border: '1px solid var(--cinza-300)', background: 'var(--superficie-1)', borderRadius: '6px', padding: '6px 10px', cursor: !metaEdificios.has_more ? 'not-allowed' : 'pointer', opacity: !metaEdificios.has_more ? 0.5 : 1 }}
-                  >
-                    Próxima
-                  </button>
-                </div>
+                {(offsetEdificios > 0 || metaEdificios.has_more) && (
+                  <div style={{ borderTop: '1px solid var(--cinza-100)', padding: '10px 12px', display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                    <button
+                      onClick={() => setOffsetEdificios(Math.max(0, offsetEdificios - LIMIT_TEMPOS_MEDIOS))}
+                      disabled={offsetEdificios === 0}
+                      style={{ 
+                        border: '1px solid var(--cinza-300)', 
+                        background: 'var(--superficie-1)', 
+                        borderRadius: '6px', 
+                        padding: '6px 10px', 
+                        cursor: offsetEdificios === 0 ? 'not-allowed' : 'pointer', 
+                        opacity: offsetEdificios === 0 ? 0.5 : 1,
+                        fontSize: '12px',
+                        color: 'var(--cinza-800)',
+                        fontFamily: "'Barlow Condensed', sans-serif",
+                        fontWeight: 600,
+                        textTransform: 'uppercase'
+                      }}
+                    >
+                      Anterior
+                    </button>
+                    <button
+                      onClick={() => setOffsetEdificios(offsetEdificios + LIMIT_TEMPOS_MEDIOS)}
+                      disabled={!metaEdificios.has_more}
+                      style={{ 
+                        border: '1px solid var(--cinza-300)', 
+                        background: 'var(--superficie-1)', 
+                        borderRadius: '6px', 
+                        padding: '6px 10px', 
+                        cursor: !metaEdificios.has_more ? 'not-allowed' : 'pointer', 
+                        opacity: !metaEdificios.has_more ? 0.5 : 1,
+                        fontSize: '12px',
+                        color: 'var(--cinza-800)',
+                        fontFamily: "'Barlow Condensed', sans-serif",
+                        fontWeight: 600,
+                        textTransform: 'uppercase'
+                      }}
+                    >
+                      Próxima
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div style={{ border: '1px solid var(--cinza-100)', borderRadius: '8px', overflow: 'hidden' }}>
-                <div style={{ background: 'var(--cinza-50)', padding: '10px 12px', fontFamily: "'Barlow Condensed', sans-serif", textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700, fontSize: '12px', color: 'var(--cinza-600)' }}>
-                  Por tipo de tarefa
+                <div style={{ background: 'var(--cinza-50)', padding: '10px 12px' }}>
+                  <div style={{ fontFamily: "'Barlow Condensed', sans-serif", textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700, fontSize: '12px', color: 'var(--cinza-600)' }}>
+                    Por tipo / etapa de tarefa
+                  </div>
+                  <div style={{ fontSize: '10px', color: 'var(--cinza-400)', marginTop: '2px' }}>tempo médio/sessão por tipo e etapa</div>
                 </div>
                 {tempoMedioTipos.length === 0 ? (
                   <div style={{ padding: '12px', color: 'var(--cinza-600)' }}>Sem dados para o período.</div>
                 ) : tempoMedioTipos.map((item, idx) => (
-                  <div key={`${item.tipo_elemento}-${item.subtipo || 'sem'}-${idx}`} style={{ borderTop: '1px solid var(--cinza-100)', padding: '10px 12px', display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
-                    <div style={{ color: 'var(--cinza-800)' }}>
-                      {item.tipo_elemento}{item.subtipo ? ` - ${item.subtipo}` : ''}
+                  <div key={`${item.tipo_elemento}-${item.etapa_atual}-${idx}`} style={{ borderTop: '1px solid var(--cinza-100)', padding: '10px 12px', display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'flex-start' }}>
+                    <div>
+                      <div style={{ color: 'var(--cinza-800)', fontWeight: 600, fontSize: '13px' }}>
+                        {formatarTipoElemento(item.tipo_elemento, null)}
+                      </div>
+                      <div style={{ fontSize: '11px', color: 'var(--cinza-500)', marginTop: '1px' }}>
+                        Etapa {item.etapa_atual} — {nomeEtapa(item.tipo_elemento, item.etapa_atual)}
+                      </div>
                     </div>
-                    <div style={{ textAlign: 'right', fontFamily: "'JetBrains Mono', monospace", color: 'var(--verde-principal)', fontWeight: 600 }}>
+                    <div style={{ textAlign: 'right', fontFamily: "'JetBrains Mono', monospace", color: 'var(--verde-principal)', fontWeight: 600, whiteSpace: 'nowrap' }}>
                       {item.tempo_medio_horas.toFixed(2)}h
+                      <div style={{ fontSize: '10px', color: 'var(--cinza-400)', fontFamily: 'inherit', fontWeight: 400 }}>média/sessão</div>
                     </div>
                   </div>
                 ))}
-                <div style={{ borderTop: '1px solid var(--cinza-100)', padding: '10px 12px', display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
-                  <button
-                    onClick={() => setOffsetTipos(Math.max(0, offsetTipos - LIMIT_TEMPOS_MEDIOS))}
-                    disabled={offsetTipos === 0}
-                    style={{ border: '1px solid var(--cinza-300)', background: 'var(--superficie-1)', borderRadius: '6px', padding: '6px 10px', cursor: offsetTipos === 0 ? 'not-allowed' : 'pointer', opacity: offsetTipos === 0 ? 0.5 : 1 }}
-                  >
-                    Anterior
-                  </button>
-                  <button
-                    onClick={() => setOffsetTipos(offsetTipos + LIMIT_TEMPOS_MEDIOS)}
-                    disabled={!metaTipos.has_more}
-                    style={{ border: '1px solid var(--cinza-300)', background: 'var(--superficie-1)', borderRadius: '6px', padding: '6px 10px', cursor: !metaTipos.has_more ? 'not-allowed' : 'pointer', opacity: !metaTipos.has_more ? 0.5 : 1 }}
-                  >
-                    Próxima
-                  </button>
-                </div>
-              </div>
-
-              <div style={{ border: '1px solid var(--cinza-100)', borderRadius: '8px', overflow: 'hidden' }}>
-                <div style={{ background: 'var(--cinza-50)', padding: '10px 12px', fontFamily: "'Barlow Condensed', sans-serif", textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700, fontSize: '12px', color: 'var(--cinza-600)' }}>
-                  Por construtora
-                </div>
-                {tempoMedioConstrutoras.length === 0 ? (
-                  <div style={{ padding: '12px', color: 'var(--cinza-600)' }}>Sem dados para o período.</div>
-                ) : tempoMedioConstrutoras.map(item => (
-                  <div key={item.construtora_id} style={{ borderTop: '1px solid var(--cinza-100)', padding: '10px 12px', display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
-                    <div style={{ color: 'var(--cinza-800)' }}>{item.construtora_nome}</div>
-                    <div style={{ textAlign: 'right', fontFamily: "'JetBrains Mono', monospace", color: 'var(--verde-principal)', fontWeight: 600 }}>
-                      {item.tempo_medio_horas.toFixed(2)}h
-                    </div>
+                {(offsetTipos > 0 || metaTipos.has_more) && (
+                  <div style={{ borderTop: '1px solid var(--cinza-100)', padding: '10px 12px', display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                    <button
+                      onClick={() => setOffsetTipos(Math.max(0, offsetTipos - LIMIT_TEMPOS_MEDIOS))}
+                      disabled={offsetTipos === 0}
+                      style={{ 
+                        border: '1px solid var(--cinza-300)', 
+                        background: 'var(--superficie-1)', 
+                        borderRadius: '6px', 
+                        padding: '6px 10px', 
+                        cursor: offsetTipos === 0 ? 'not-allowed' : 'pointer', 
+                        opacity: offsetTipos === 0 ? 0.5 : 1,
+                        fontSize: '12px',
+                        color: 'var(--cinza-800)',
+                        fontFamily: "'Barlow Condensed', sans-serif",
+                        fontWeight: 600,
+                        textTransform: 'uppercase'
+                      }}
+                    >
+                      Anterior
+                    </button>
+                    <button
+                      onClick={() => setOffsetTipos(offsetTipos + LIMIT_TEMPOS_MEDIOS)}
+                      disabled={!metaTipos.has_more}
+                      style={{ 
+                        border: '1px solid var(--cinza-300)', 
+                        background: 'var(--superficie-1)', 
+                        borderRadius: '6px', 
+                        padding: '6px 10px', 
+                        cursor: !metaTipos.has_more ? 'not-allowed' : 'pointer', 
+                        opacity: !metaTipos.has_more ? 0.5 : 1,
+                        fontSize: '12px',
+                        color: 'var(--cinza-800)',
+                        fontFamily: "'Barlow Condensed', sans-serif",
+                        fontWeight: 600,
+                        textTransform: 'uppercase'
+                      }}
+                    >
+                      Próxima
+                    </button>
                   </div>
-                ))}
-                <div style={{ borderTop: '1px solid var(--cinza-100)', padding: '10px 12px', display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
-                  <button
-                    onClick={() => setOffsetConstrutoras(Math.max(0, offsetConstrutoras - LIMIT_TEMPOS_MEDIOS))}
-                    disabled={offsetConstrutoras === 0}
-                    style={{ border: '1px solid var(--cinza-300)', background: 'var(--superficie-1)', borderRadius: '6px', padding: '6px 10px', cursor: offsetConstrutoras === 0 ? 'not-allowed' : 'pointer', opacity: offsetConstrutoras === 0 ? 0.5 : 1 }}
-                  >
-                    Anterior
-                  </button>
-                  <button
-                    onClick={() => setOffsetConstrutoras(offsetConstrutoras + LIMIT_TEMPOS_MEDIOS)}
-                    disabled={!metaConstrutoras.has_more}
-                    style={{ border: '1px solid var(--cinza-300)', background: 'var(--superficie-1)', borderRadius: '6px', padding: '6px 10px', cursor: !metaConstrutoras.has_more ? 'not-allowed' : 'pointer', opacity: !metaConstrutoras.has_more ? 0.5 : 1 }}
-                  >
-                    Próxima
-                  </button>
-                </div>
+                )}
               </div>
             </div>
           )}
@@ -717,12 +803,24 @@ export default function AdminDashboard() {
                   </span>
                 </div>
               ))}
-              {produtividade.length === 0 && <p style={{ color: 'var(--cinza-300)', fontStyle: 'italic' }}>Nenhum registro encontrado</p>}
+              {produtividade.length === 0 && <p style={{ color: 'var(--texto-secundario)', fontStyle: 'italic' }}>Nenhum registro encontrado</p>}
             </div>
           </div>
         </div>
 
       </div>
+
+      <ModalDetalheEdificio
+        isOpen={detalheEdificioAberto}
+        onClose={() => { setDetalheEdificioAberto(false); setDetalheEdificio(null) }}
+        detalhe={detalheEdificio}
+      />
+
+      <ModalDetalheAtividade
+        isOpen={detalheAtividadeAberto}
+        onClose={() => { setDetalheAtividadeAberto(false); setDetalheAtividade(null) }}
+        detalhe={detalheAtividade}
+      />
     </>
   )
 }

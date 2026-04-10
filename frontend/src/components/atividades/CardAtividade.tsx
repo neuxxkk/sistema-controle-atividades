@@ -1,6 +1,6 @@
 'use client'
 import { StatusBadge } from '@/components/ui/Badge'
-import { formatarTipoElemento, formatarLaje, vinculaFuncionario } from '@/lib/constants'
+import { formatarTipoElemento, formatarLaje, formatarNomeEdificio, vinculaFuncionario } from '@/lib/constants'
 import type { Atividade, StatusAtividade } from '@/types'
 
 interface Props {
@@ -36,7 +36,7 @@ export function CardAtividade({
   const podeAvancar = !concluida && (mostrarAvanco ?? true)
 
   const lajeNome = atividade.laje ? formatarLaje(atividade.laje.tipo) : 'Laje'
-  const edificioNome = atividade.laje?.edificio?.nome || 'Edifício'
+  const edificioNome = formatarNomeEdificio(atividade.laje?.edificio)
 
   return (
     <div style={{

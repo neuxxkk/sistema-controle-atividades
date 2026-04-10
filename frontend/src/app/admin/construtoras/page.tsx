@@ -113,7 +113,7 @@ export default function ConstrutorasPage() {
               {loading ? (
                 <tr><td colSpan={4} style={{ padding: '32px', textAlign: 'center' }}>Carregando construtoras...</td></tr>
               ) : construtoras.length === 0 ? (
-                <tr><td colSpan={4} style={{ padding: '32px', textAlign: 'center', color: 'var(--cinza-300)' }}>Nenhuma construtora cadastrada.</td></tr>
+                <tr><td colSpan={4} style={{ padding: '32px', textAlign: 'center', color: 'var(--texto-secundario)' }}>Nenhuma construtora cadastrada.</td></tr>
               ) : (
                 construtoras.map((c) => (
                   <tr key={c.id} style={{ borderBottom: '1px solid var(--cinza-100)', transition: 'background 160ms ease' }}>

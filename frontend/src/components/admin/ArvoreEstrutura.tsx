@@ -357,7 +357,7 @@ export function ArvoreEstrutura({
 
   // Nome composto: Construtora - Edificio
   const nomeCompleto = edificio.construtora
-    ? `${edificio.construtora.nome} — ${edificio.nome}`
+    ? `${edificio.construtora.nome} - ${edificio.nome}`
     : edificio.nome
 
   return (
