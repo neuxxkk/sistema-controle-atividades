@@ -3,17 +3,17 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { api } from '@/lib/api'
 import { useUsuario } from '@/context/UsuarioContext'
 import { useToast } from '@/context/ToastContext'
-import type { SessaoTrabalho, Atividade, Edificio, Laje } from '@/types'
+import type { SessaoTrabalho, Atividade } from '@/types'
 
 interface SessaoContextData {
   sessaoAtiva: SessaoTrabalho | null
   atividadeAtiva: Atividade | null
-  edificioAtivo: Edificio | null
-  lajeAtiva: Laje | null
   carregando: boolean
   iniciarSessao: (atividadeId: number) => Promise<void>
   pausarSessao: () => Promise<void>
-  finalizarSessao: () => Promise<void>
+  retomarSessao: (atividadeId: number) => Promise<void>
+  avancarEtapa: (atividadeId: number) => Promise<void>
+  finalizarAtividade: (atividadeId: number) => Promise<void>
   refreshSessao: () => Promise<void>
 }
 
@@ -24,8 +24,6 @@ export function SessaoProvider({ children }: { children: React.ReactNode }) {
   const { addToast } = useToast()
   const [sessaoAtiva, setSessaoAtiva] = useState<SessaoTrabalho | null>(null)
   const [atividadeAtiva, setAtividadeAtiva] = useState<Atividade | null>(null)
-  const [edificioAtivo, setEdificioAtivo] = useState<Edificio | null>(null)
-  const [lajeAtiva, setLajeAtiva] = useState<Laje | null>(null)
   const [carregando, setCarregando] = useState(true)
 
   const refreshSessao = useCallback(async () => {
@@ -35,12 +33,11 @@ export function SessaoProvider({ children }: { children: React.ReactNode }) {
       setCarregando(false)
       return
     }
-
     try {
-      // Garantindo que a URL seja exatamente /api/sessoes/status-atual
-      const sessao = await api.get<SessaoTrabalho | null>(`/sessoes/status-atual?usuario_id=${usuario.usuario_id}`)
+      const sessao = await api.get<SessaoTrabalho | null>(
+        `/sessoes/status-atual?usuario_id=${usuario.usuario_id}`
+      )
       setSessaoAtiva(sessao)
-
       if (sessao) {
         const atividade = await api.get<Atividade>(`/atividades/${sessao.atividade_id}`)
         setAtividadeAtiva(atividade)
@@ -61,39 +58,72 @@ export function SessaoProvider({ children }: { children: React.ReactNode }) {
   const iniciarSessao = async (atividadeId: number) => {
     if (!usuario?.usuario_id) return
     try {
-      const novaSessao = await api.post<SessaoTrabalho>('/sessoes/', {
-        atividade_id: atividadeId,
-        usuario_id: usuario.usuario_id
-      })
-      setSessaoAtiva(novaSessao)
+      await api.post(`/atividades/${atividadeId}/iniciar?usuario_id=${usuario.usuario_id}`, {})
       await refreshSessao()
-      addToast('Sessão iniciada!', 'sucesso')
+      addToast('Tarefa iniciada!', 'sucesso')
     } catch (error: any) {
-      addToast(error.message || 'Erro ao iniciar sessão', 'erro')
+      addToast(error.message || 'Erro ao iniciar tarefa', 'erro')
+      throw error
     }
   }
 
   const pausarSessao = async () => {
-    if (!sessaoAtiva || !usuario?.usuario_id) return
+    if (!atividadeAtiva || !usuario?.usuario_id) return
     try {
-      await api.put<SessaoTrabalho>(`/sessoes/${sessaoAtiva.id}/pausar?usuario_id=${usuario.usuario_id}`, {})
+      await api.post(`/atividades/${atividadeAtiva.id}/pausar?usuario_id=${usuario.usuario_id}`, {})
       setSessaoAtiva(null)
       setAtividadeAtiva(null)
       await refreshSessao()
-      addToast('Atividade pausada!', 'sucesso')
+      addToast('Tarefa pausada!', 'sucesso')
     } catch (error: any) {
-      addToast(error.message || 'Erro ao pausar atividade', 'erro')
+      addToast(error.message || 'Erro ao pausar tarefa', 'erro')
+      throw error
     }
   }
 
-  const finalizarSessao = async () => {
-    await pausarSessao()
+  const retomarSessao = async (atividadeId: number) => {
+    if (!usuario?.usuario_id) return
+    try {
+      await api.post(`/atividades/${atividadeId}/retomar?usuario_id=${usuario.usuario_id}`, {})
+      await refreshSessao()
+      addToast('Tarefa retomada!', 'sucesso')
+    } catch (error: any) {
+      addToast(error.message || 'Erro ao retomar tarefa', 'erro')
+      throw error
+    }
+  }
+
+  const avancarEtapa = async (atividadeId: number) => {
+    if (!usuario?.usuario_id) return
+    try {
+      await api.post(`/atividades/${atividadeId}/avancar-etapa?usuario_id=${usuario.usuario_id}`, {})
+      await refreshSessao()
+      addToast('Etapa avançada!', 'sucesso')
+    } catch (error: any) {
+      addToast(error.message || 'Erro ao avançar etapa', 'erro')
+      throw error
+    }
+  }
+
+  const finalizarAtividade = async (atividadeId: number) => {
+    if (!usuario?.usuario_id) return
+    try {
+      await api.post(`/atividades/${atividadeId}/finalizar?usuario_id=${usuario.usuario_id}`, {})
+      setSessaoAtiva(null)
+      setAtividadeAtiva(null)
+      await refreshSessao()
+      addToast('Tarefa finalizada!', 'sucesso')
+    } catch (error: any) {
+      addToast(error.message || 'Erro ao finalizar tarefa', 'erro')
+      throw error
+    }
   }
 
   return (
     <SessaoContext.Provider value={{
-      sessaoAtiva, atividadeAtiva, edificioAtivo, lajeAtiva, carregando,
-      iniciarSessao, pausarSessao, finalizarSessao, refreshSessao
+      sessaoAtiva, atividadeAtiva, carregando,
+      iniciarSessao, pausarSessao, retomarSessao,
+      avancarEtapa, finalizarAtividade, refreshSessao,
     }}>
       {children}
     </SessaoContext.Provider>

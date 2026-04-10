@@ -14,9 +14,15 @@ export type TipoElemento =
 
 export type Subtipo = 'Rascunho' | 'Formato' | null
 
+// Status legado — mantido para compatibilidade com dados existentes
 export type StatusAtividade =
   | 'Pendente' | 'Gerado' | 'Impresso' | 'Montada'
   | 'Fazendo' | 'Pausado' | 'Ok' | 'Atendendo comentarios'
+
+// Novo ciclo de vida canônico
+export type StatusCiclo = 'Pendente' | 'Em andamento' | 'Pausada' | 'Finalizada'
+
+export type AcaoAtividade = 'iniciar' | 'pausar' | 'retomar' | 'avancar_etapa' | 'finalizar'
 
 export interface ProximosStatusAtividade {
   atividade_id: number
@@ -25,12 +31,21 @@ export interface ProximosStatusAtividade {
   selecao_obrigatoria: boolean
 }
 
+export interface AcoesDisponiveis {
+  atividade_id: number
+  status_ciclo: StatusCiclo
+  etapa_atual: number
+  etapa_total: number
+  acoes: AcaoAtividade[]
+}
+
 export interface AtividadeDetalhe {
   atividade: Atividade
   usuario_vinculado: Usuario | null
   iniciada_em: string | null
-  pausada_em: string | null
+  finalizada_em: string | null
   em_andamento_desde: string | null
+  tempo_por_usuario: { usuario: Usuario; tempo_segundos: number }[]
 }
 
 export interface Atividade {
@@ -39,11 +54,14 @@ export interface Atividade {
   tipo_elemento: TipoElemento
   subtipo: Subtipo
   status_atual: StatusAtividade
+  status_ciclo: StatusCiclo
+  etapa_atual: number
+  etapa_total: number
   usuario_responsavel_id: number | null
   criado_em: string
   atualizado_em: string
-  // Relacionamentos carregados opcionalmente
   laje?: Laje
+  usuario_responsavel?: Usuario | null
 }
 
 export interface Laje {
@@ -59,6 +77,7 @@ export interface Edificio {
   id: number
   construtora_id: number
   construtora_nome?: string
+  construtora?: { id: number; nome: string; criado_em: string }
   nome: string
   descricao: string | null
   criado_em: string
@@ -83,6 +102,28 @@ export interface SessaoTrabalho {
   duracao_segundos: number | null
   atividade?: Atividade
   usuario?: Usuario
+}
+
+export interface ItemRelatorio {
+  id: number
+  edificio: string
+  laje: string
+  tarefa: string
+  status: string
+  etapa_atual: number
+  etapa_total: number
+  tipo_original: string
+  horas_totais: number
+  contribuicoes: { usuario: string; horas: number }[]
+}
+
+export interface EdificioDetalhe {
+  edificio: Edificio
+  primeiro_inicio: string | null
+  ultima_finalizacao: string | null
+  total_atividades: number
+  atividades_finalizadas: number
+  tempo_por_usuario: { usuario: Usuario; tempo_segundos: number }[]
 }
 
 export interface UsuarioLocal {
