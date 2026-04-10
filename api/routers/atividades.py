@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
@@ -44,6 +44,37 @@ async def _broadcast():
             await manager.broadcast(payload)
     except Exception:
         pass
+
+
+def _ip_requisicao(request: Request) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    return request.client.host
+
+
+async def _validar_maquina_usuario(usuario_id: int, request: Request, db: AsyncSession) -> None:
+    usuario = await db.get(models.Usuario, usuario_id)
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado")
+
+    # Regra atual de vínculo obrigatório aplicada a funcionários.
+    if usuario.role != "funcionario":
+        return
+
+    vinculo_result = await db.execute(
+        select(models.VinculoMaquina).where(models.VinculoMaquina.usuario_id == usuario_id)
+    )
+    vinculo = vinculo_result.scalar_one_or_none()
+    if not vinculo:
+        raise HTTPException(status_code=403, detail="Usuário sem vínculo de máquina")
+
+    ip_atual = _ip_requisicao(request)
+    if vinculo.ip != ip_atual:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Máquina não autorizada para este usuário. IP esperado: {vinculo.ip}",
+        )
 
 
 # ── Endpoints de leitura ───────────────────────────────────────────────────
@@ -168,9 +199,11 @@ async def get_atividade_historico(atividade_id: int, db: AsyncSession = Depends(
 async def iniciar_atividade(
     atividade_id: int,
     usuario_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """Inicia uma tarefa Pendente, vinculando o funcionário e abrindo sessão."""
+    await _validar_maquina_usuario(usuario_id, request, db)
     atividade = await _get_atividade_ou_404(atividade_id, db)
     await workflow.iniciar(atividade, usuario_id, db)
     await db.commit()
@@ -182,9 +215,11 @@ async def iniciar_atividade(
 async def pausar_atividade(
     atividade_id: int,
     usuario_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """Pausa uma tarefa Em andamento, fechando a sessão ativa."""
+    await _validar_maquina_usuario(usuario_id, request, db)
     atividade = await _get_atividade_ou_404(atividade_id, db)
     await workflow.pausar(atividade, usuario_id, db)
     await db.commit()
@@ -196,9 +231,11 @@ async def pausar_atividade(
 async def retomar_atividade(
     atividade_id: int,
     usuario_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """Retoma uma tarefa Pausada, abrindo nova sessão (roubo de vínculo permitido)."""
+    await _validar_maquina_usuario(usuario_id, request, db)
     atividade = await _get_atividade_ou_404(atividade_id, db)
     await workflow.retomar(atividade, usuario_id, db)
     await db.commit()
@@ -210,9 +247,11 @@ async def retomar_atividade(
 async def avancar_etapa_atividade(
     atividade_id: int,
     usuario_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """Avança para a próxima etapa (requer Pausada ou Em andamento pelo próprio vinculado)."""
+    await _validar_maquina_usuario(usuario_id, request, db)
     atividade = await _get_atividade_ou_404(atividade_id, db)
     await workflow.avancar_etapa(atividade, usuario_id, db)
     await db.commit()
@@ -223,9 +262,11 @@ async def avancar_etapa_atividade(
 async def finalizar_atividade(
     atividade_id: int,
     usuario_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """Finaliza uma tarefa na última etapa."""
+    await _validar_maquina_usuario(usuario_id, request, db)
     atividade = await _get_atividade_ou_404(atividade_id, db)
     await workflow.finalizar(atividade, usuario_id, db)
     await db.commit()

@@ -20,6 +20,9 @@ async def ensure_analytics_indexes() -> None:
         "CREATE INDEX IF NOT EXISTS idx_atividades_usuario_status ON atividades (usuario_responsavel_id, status_atual)",
         "CREATE INDEX IF NOT EXISTS idx_lajes_edificio_id ON lajes (edificio_id)",
         "CREATE INDEX IF NOT EXISTS idx_edificios_construtora_id ON edificios (construtora_id)",
+        "CREATE INDEX IF NOT EXISTS idx_vinculos_maquina_usuario_id ON vinculos_maquina (usuario_id)",
+        "CREATE INDEX IF NOT EXISTS idx_vinculos_maquina_ip ON vinculos_maquina (ip)",
+        "CREATE INDEX IF NOT EXISTS idx_vinculos_maquina_historico_usuario_id ON vinculos_maquina_historico (usuario_id)",
     ]
 
     async with AsyncSessionLocal() as session:
