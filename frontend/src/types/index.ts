@@ -8,6 +8,51 @@ export interface Usuario {
   criado_em: string
 }
 
+export interface VinculoMaquina {
+  id: number
+  usuario_id: number
+  nome_dispositivo: string
+  ip: string
+  windows_username: string
+  criado_em: string
+  atualizado_em: string
+}
+
+export interface PrimeiroAcessoRequest {
+  nome_completo: string
+  nome_dispositivo: string
+  ip: string
+  windows_username: string
+  confirmar_maquina_anterior?: boolean
+}
+
+export interface PrimeiroAcessoResponse {
+  usuario: Usuario
+  vinculo_maquina: VinculoMaquina | null
+  primeiro_acesso: boolean
+}
+
+export interface AlterarVinculoMaquinaRequest {
+  admin_id: number
+  nome_dispositivo: string
+  ip: string
+  windows_username: string
+}
+
+export interface VinculoMaquinaHistorico {
+  id: number
+  usuario_id: number
+  admin_id: number | null
+  acao: string
+  nome_dispositivo_antes: string | null
+  ip_antes: string | null
+  windows_username_antes: string | null
+  nome_dispositivo_depois: string
+  ip_depois: string
+  windows_username_depois: string
+  criado_em: string
+}
+
 export type TipoElemento =
   | 'Vigas' | 'Lajes' | 'GrelhaRefinada'
   | 'Cortinas' | 'Rampa' | 'Escada' | 'BlocosFundacao'
