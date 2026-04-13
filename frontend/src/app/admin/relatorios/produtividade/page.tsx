@@ -1,7 +1,7 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { api } from '@/lib/api'
-import { formatarNomeEdificio } from '@/lib/constants'
+import { formatarLaje, formatarNomeEdificio } from '@/lib/constants'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { RelatorioProdutividadeTabela } from '@/components/admin/RelatorioProdutividadeTabela'
 import { useToast } from '@/context/ToastContext'
@@ -16,6 +16,7 @@ export default function RelatorioProdutividadePage() {
   const [pavimentos, setPavimentos] = useState<string[]>([])
   const [carregando, setCarregando] = useState(false)
   const [showPavimentos, setShowPavimentos] = useState(false)
+  const pavimentosDropdownRef = useRef<HTMLDivElement | null>(null)
 
   // Filtros
   const [edificioId, setEdificioId] = useState<number | null>(null)
@@ -61,7 +62,21 @@ export default function RelatorioProdutividadePage() {
     if (edificioId) {
       const ed = edificios.find(e => e.id === edificioId)
       if (ed?.lajes) {
-        const tipos = Array.from(new Set(ed.lajes.map(l => l.tipo))).sort()
+        const ordemPavimento = (tipo: string) => {
+          if (tipo === 'Fundacao') return 0
+          if (tipo === 'FundCX') return 1
+          if (tipo === 'TampaCX') return 2
+          const match = tipo.match(/^Laje_(\d+)$/)
+          if (match) return 100 + Number(match[1])
+          return 1000
+        }
+
+        const tipos = Array.from(new Set(ed.lajes.map(l => l.tipo))).sort((a, b) => {
+          const ordemA = ordemPavimento(a)
+          const ordemB = ordemPavimento(b)
+          if (ordemA !== ordemB) return ordemA - ordemB
+          return a.localeCompare(b, 'pt-BR')
+        })
         // Adiciona a opção de elementos gerais do edifício no topo
         const pavs = ['(Edifício)', ...tipos]
         setPavimentos(pavs)
@@ -84,6 +99,20 @@ export default function RelatorioProdutividadePage() {
     carregarRelatorio()
   }, [carregarRelatorio])
 
+  useEffect(() => {
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (!showPavimentos) return
+      const alvo = event.target as Node
+      if (pavimentosDropdownRef.current?.contains(alvo)) return
+      setShowPavimentos(false)
+    }
+
+    document.addEventListener('mousedown', handleOutsideClick)
+    return () => document.removeEventListener('mousedown', handleOutsideClick)
+  }, [showPavimentos])
+
+  const labelPavimento = (p: string) => (p === '(Edifício)' ? 'Geral (Edifício)' : formatarLaje(p))
+
   const TIPOS: { label: string, value: TipoElemento }[] = [
     { label: 'Vigas', value: 'Vigas' },
     { label: 'Lajes', value: 'Lajes' },
@@ -94,7 +123,7 @@ export default function RelatorioProdutividadePage() {
     { label: 'Blocos de Fundação', value: 'BlocosFundacao' },
   ]
 
-  const STATUS: StatusCiclo[] = ['Pendente', 'Em andamento', 'Pausada', 'Finalizada']
+  const STATUS: StatusCiclo[] = ['Pendente', 'Em andamento', 'Pausada', 'Etapa concluida', 'Finalizada']
 
   return (
     <div style={{ background: 'var(--cinza-100)', minHeight: '100vh' }}>
@@ -196,6 +225,7 @@ export default function RelatorioProdutividadePage() {
             </div>
 
             <div 
+              ref={pavimentosDropdownRef}
               style={{ 
                 display: 'flex', 
                 flexDirection: 'column', 
@@ -203,8 +233,7 @@ export default function RelatorioProdutividadePage() {
                 position: 'relative',
                 paddingBottom: '8px',
                 marginBottom: '-8px'
-              }} 
-              onMouseLeave={() => setShowPavimentos(false)}
+              }}
             >
               <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--cinza-600)', textTransform: 'uppercase', letterSpacing: '0.05em', fontFamily: "'Barlow Condensed', sans-serif" }}>
                 Pavimentos
@@ -238,7 +267,7 @@ export default function RelatorioProdutividadePage() {
                 }}>
                   {pavimentoFiltro.length === 0 ? 'Nenhum' : 
                    pavimentoFiltro.length === pavimentos.length ? 'Todos selecionados' :
-                   pavimentoFiltro.length === 1 && pavimentoFiltro[0] === '(Edifício)' ? 'Geral (Edifício)' :
+                   pavimentoFiltro.length === 1 ? labelPavimento(pavimentoFiltro[0]) :
                    `${pavimentoFiltro.length} item(ns)`}
                 </span>
                 <ChevronDown size={16} style={{ 
@@ -281,7 +310,7 @@ export default function RelatorioProdutividadePage() {
                           checked={pavimentoFiltro.includes(p)} 
                           onChange={() => togglePavimento(p)} 
                         />
-                        {p === '(Edifício)' ? 'Geral (Edifício)' : p}
+                        {labelPavimento(p)}
                       </label>
                     ))}
                   </div>

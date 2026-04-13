@@ -1,5 +1,5 @@
 'use client'
-import { useState, useCallback, useMemo, useEffect } from 'react'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import type { Edificio, Laje, Atividade, AcaoAtividade, StatusCiclo } from '@/types'
 import {
   formatarLaje, formatarTipoElemento, calcularAcoes,
@@ -21,6 +21,10 @@ interface Props {
   // Compatibilidade legada (admin com dropdown de status)
   onUpdateStatus?: (atividadeId: number, novoStatus: string) => void
   statusOpcoesPorAtividade?: Record<number, string[]>
+  iniciarRecolhido?: boolean
+  atividadeFocoId?: number | null
+  comandoEdificioGlobal?: { versao: number; recolher: boolean } | null
+  ocultarSemPavimentosNoFiltro?: boolean
 }
 
 const TIPOS_COM_ETAPAS = ['Vigas', 'Lajes'] as const
@@ -63,11 +67,13 @@ function StatusPill({ status }: { status: StatusCiclo }) {
       textTransform: 'uppercase' as const,
       background: status === 'Em andamento' ? 'var(--verde-claro)'
         : status === 'Pausada' ? '#fef3c7'
+        : status === 'Etapa concluida' ? '#dbeafe'
         : status === 'Finalizada' ? '#ede9fe'
         : 'var(--cinza-100)',
       color: COR_STATUS_CICLO[status],
       border: `1px solid ${status === 'Em andamento' ? 'var(--verde-principal)'
         : status === 'Pausada' ? '#f59e0b'
+        : status === 'Etapa concluida' ? '#2563eb'
         : status === 'Finalizada' ? '#6366f1'
         : 'var(--cinza-300)'}`,
     }}>
@@ -123,10 +129,16 @@ export function ArvoreEstrutura({
   onDetalhe,
   onUpdateStatus,
   statusOpcoesPorAtividade = {},
+  iniciarRecolhido = false,
+  atividadeFocoId = null,
+  comandoEdificioGlobal = null,
+  ocultarSemPavimentosNoFiltro = false,
 }: Props) {
   const [lajsAbertas, setLajsAbertas] = useState<Set<number>>(new Set())
   const [geraisAbertas, setGeraisAbertas] = useState(false)
+  const [edificioRecolhido, setEdificioRecolhido] = useState(iniciarRecolhido)
   const [executando, setExecutando] = useState<Set<number>>(new Set())
+  const ultimoFocoAplicadoRef = useRef<number | null>(null)
 
   const lajes = edificio.lajes || []
   const lajesOrdenadas = [...lajes].sort((a, b) => a.ordem - b.ordem)
@@ -148,6 +160,7 @@ export function ArvoreEstrutura({
 
   // Expandir / recolher todos
   const expandirTodos = useCallback(() => {
+    setEdificioRecolhido(false)
     setLajsAbertas(new Set(lajesOrdenadas.map(l => l.id)))
     setGeraisAbertas(true)
   }, [lajesOrdenadas])
@@ -223,8 +236,33 @@ export function ArvoreEstrutura({
         }}
       >
         {/* Tarefa */}
-        <span style={{ fontSize: '13px', fontWeight: 500 }}>
-          {formatarTipoElemento(ativ.tipo_elemento, ativ.subtipo)}
+        <span style={{ fontSize: '13px', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+          {onDetalhe ? (
+            <button
+              onClick={() => onDetalhe(ativ.id)}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.textDecoration = 'underline'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.textDecoration = 'none'
+              }}
+              style={{
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--cinza-800)',
+                fontSize: '13px',
+                fontFamily: "'DM Sans', sans-serif",
+                fontWeight: 500,
+                textDecoration: 'none',
+                cursor: 'pointer',
+                padding: 0,
+              }}
+            >
+              {formatarTipoElemento(ativ.tipo_elemento, ativ.subtipo)}
+            </button>
+          ) : (
+            formatarTipoElemento(ativ.tipo_elemento, ativ.subtipo)
+          )}
           {ativ.etapa_total > 1 && (
             <span style={{ fontSize: '11px', color: 'var(--cinza-500)', marginLeft: '6px', fontStyle: 'italic' }}>
               ({nomeEtapa(ativ.tipo_elemento, ativ.etapa_atual, ativ.subtipo)})
@@ -247,21 +285,6 @@ export function ArvoreEstrutura({
 
         {/* Ações */}
         <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' as const, alignItems: 'center' }}>
-          {modoAdmin && onDetalhe && (
-            <button
-              onClick={() => onDetalhe(ativ.id)}
-              style={{
-                padding: '3px 8px', borderRadius: '4px',
-                border: '1px solid var(--cinza-400)', background: 'transparent',
-                color: 'var(--cinza-600)', fontSize: '11px',
-                fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700,
-                textTransform: 'uppercase' as const, letterSpacing: '0.04em',
-                cursor: 'pointer', whiteSpace: 'nowrap' as const,
-              }}
-            >
-              Detalhes
-            </button>
-          )}
           {ativ.status_ciclo === 'Finalizada' ? (
             <span style={{ fontSize: '12px', color: '#6366f1', fontWeight: 700 }}>✓</span>
           ) : acoes.length === 0 ? (
@@ -326,18 +349,44 @@ export function ArvoreEstrutura({
     }
   }, [atividadeEmAndamentoEhGeral])
 
-  const recolherTodosComRegra = useCallback(() => {
-    setLajsAbertas(() => {
-      const next = new Set<number>()
-      if (lajeDaAtividadeEmAndamentoId !== null) {
-        next.add(lajeDaAtividadeEmAndamentoId)
-      }
+  useEffect(() => {
+    if (atividadeFocoId === null) return
+    if (ultimoFocoAplicadoRef.current === atividadeFocoId) return
+
+    const atividadeGeral = atividadesGerais.some(a => a.id === atividadeFocoId)
+    if (atividadeGeral) {
+      setEdificioRecolhido(false)
+      setGeraisAbertas(true)
+      ultimoFocoAplicadoRef.current = atividadeFocoId
+      return
+    }
+
+    const lajeFoco = lajesOrdenadas.find(laje => (laje.atividades ?? []).some(a => a.id === atividadeFocoId))
+    if (!lajeFoco) return
+
+    setEdificioRecolhido(false)
+    setLajsAbertas(prev => {
+      if (prev.has(lajeFoco.id)) return prev
+      const next = new Set(prev)
+      next.add(lajeFoco.id)
       return next
     })
-    setGeraisAbertas(atividadeEmAndamentoEhGeral)
-  }, [lajeDaAtividadeEmAndamentoId, atividadeEmAndamentoEhGeral])
+    ultimoFocoAplicadoRef.current = atividadeFocoId
+  }, [atividadeFocoId, atividadesGerais, lajesOrdenadas])
+
+  useEffect(() => {
+    if (!comandoEdificioGlobal) return
+    setEdificioRecolhido(comandoEdificioGlobal.recolher)
+  }, [comandoEdificioGlobal])
+
+  const recolherTodosComRegra = useCallback(() => {
+    setEdificioRecolhido(true)
+    setLajsAbertas(new Set())
+    setGeraisAbertas(false)
+  }, [])
 
   const toggleLajeComRegra = (id: number) => {
+    setEdificioRecolhido(false)
     if (lajeDaAtividadeEmAndamentoId === id) return
     toggleLaje(id)
   }
@@ -354,11 +403,47 @@ export function ArvoreEstrutura({
     if (termos.every(t => lajeNome.includes(t))) return true
     return ativs.some(a => combinaFiltro(a, laje.tipo))
   })
+  const lajesFiltradasIdsKey = lajesFiltradas.map(l => l.id).join(',')
+
+  const deveOcultarPorBusca = ocultarSemPavimentosNoFiltro && termos.length > 0 && lajesFiltradas.length === 0
+
+  useEffect(() => {
+    if (!termos.length) return
+    const deveAbrirGerais = atividadesGerais.length > 0
+    const idsFiltrados = new Set(lajesFiltradas.map(l => l.id))
+
+    setEdificioRecolhido(prev => (prev ? false : prev))
+    setGeraisAbertas(prev => (prev === deveAbrirGerais ? prev : deveAbrirGerais))
+    setLajsAbertas(prev => {
+      if (prev.size === idsFiltrados.size) {
+        let iguais = true
+        for (const id of idsFiltrados) {
+          if (!prev.has(id)) {
+            iguais = false
+            break
+          }
+        }
+        if (iguais) return prev
+      }
+      return idsFiltrados
+    })
+  }, [termos.length, atividadesGerais.length, lajesFiltradasIdsKey])
 
   // Nome composto: Construtora - Edificio
   const nomeCompleto = edificio.construtora
     ? `${edificio.construtora.nome} - ${edificio.nome}`
     : edificio.nome
+
+  const atividadesEdificio = lajesOrdenadas.flatMap(laje => laje.atividades ?? [])
+  const tarefasPausadas = atividadesEdificio.filter(a => a.status_ciclo === 'Pausada').length
+  const tarefasFinalizadas = atividadesEdificio.filter(a => a.status_ciclo === 'Finalizada').length
+  const percentualConclusao = atividadesEdificio.length > 0
+    ? Math.round((tarefasFinalizadas / atividadesEdificio.length) * 100)
+    : 0
+
+  if (deveOcultarPorBusca) {
+    return null
+  }
 
   return (
     <div style={{ background: 'var(--superficie-1)', borderRadius: '8px', border: '1px solid var(--cinza-300)', overflow: 'hidden' }}>
@@ -373,21 +458,54 @@ export function ArvoreEstrutura({
         justifyContent: 'space-between',
         gap: '12px',
       }}>
-        <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button
+            onClick={() => setEdificioRecolhido(prev => !prev)}
+            aria-label={edificioRecolhido ? 'Expandir edifício' : 'Recolher edifício'}
+            style={{
+              width: '24px',
+              height: '24px',
+              borderRadius: '4px',
+              border: '1px solid var(--cinza-300)',
+              background: 'var(--superficie-1)',
+              color: 'var(--cinza-700)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              fontSize: '11px',
+              fontWeight: 700,
+              flexShrink: 0,
+            }}
+          >
+            {edificioRecolhido ? '▶' : '▼'}
+          </button>
+          <div>
           <h3 style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: '18px', fontWeight: 700, margin: 0 }}>
             {nomeCompleto}
           </h3>
-          <p style={{ fontSize: '12px', color: 'var(--cinza-600)', margin: '2px 0 0' }}>
-            {lajesFiltradas.length} pavimento{lajesFiltradas.length !== 1 ? 's' : ''}
-          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '11px', color: 'var(--cinza-600)', fontWeight: 600 }}>
+              {lajesFiltradas.length} pavimento{lajesFiltradas.length !== 1 ? 's' : ''}
+            </span>
+            <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '999px', background: '#fef3c7', color: '#f59e0b', fontWeight: 700, border: '1px solid #f59e0b' }}>
+              {tarefasPausadas} pausada{tarefasPausadas !== 1 ? 's' : ''}
+            </span>
+            <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '999px', background: 'var(--verde-claro)', color: 'var(--verde-principal)', fontWeight: 700, border: '1px solid var(--verde-principal)' }}>
+              {percentualConclusao}% concluido
+            </span>
+          </div>
+          </div>
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
-          <button
-            onClick={expandirTodos}
-            style={{ fontSize: '11px', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: '0.04em', padding: '4px 10px', border: '1px solid var(--cinza-300)', borderRadius: '4px', background: 'var(--superficie-1)', color: 'var(--texto-principal)', cursor: 'pointer' }}
-          >
-            Expandir tudo
-          </button>
+          {!edificioRecolhido && (
+            <button
+              onClick={expandirTodos}
+              style={{ fontSize: '11px', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: '0.04em', padding: '4px 10px', border: '1px solid var(--cinza-300)', borderRadius: '4px', background: 'var(--superficie-1)', color: 'var(--texto-principal)', cursor: 'pointer' }}
+            >
+              Expandir tudo
+            </button>
+          )}
           <button
             onClick={recolherTodosComRegra}
             style={{ fontSize: '11px', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: '0.04em', padding: '4px 10px', border: '1px solid var(--cinza-300)', borderRadius: '4px', background: 'var(--superficie-1)', color: 'var(--texto-principal)', cursor: 'pointer' }}
@@ -396,6 +514,9 @@ export function ArvoreEstrutura({
           </button>
         </div>
       </div>
+
+      {edificioRecolhido ? null : (
+        <>
 
       {/* Cabeçalho das colunas */}
       <div style={{ ...ROW_STYLE, background: 'var(--cinza-50)', borderBottom: '2px solid var(--cinza-200)' }}>
@@ -517,6 +638,8 @@ export function ArvoreEstrutura({
         <div style={{ padding: '20px', color: 'var(--cinza-600)', fontSize: '14px' }}>
           Nenhum item encontrado para este filtro.
         </div>
+      )}
+        </>
       )}
     </div>
   )

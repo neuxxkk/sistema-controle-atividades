@@ -8,7 +8,7 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { TimerBanner } from '@/components/layout/TimerBanner'
 import { ModalDetalheAtividade } from '@/components/atividades/ModalDetalheAtividade'
 import { ArvoreEstrutura, type EdificioCompleto } from '@/components/admin/ArvoreEstrutura'
-import { Search, X, Filter, ChevronDown } from 'lucide-react'
+import { Search, X, Filter, ChevronDown, ChevronsDown, ChevronsRight } from 'lucide-react'
 import type { AcaoAtividade, AtividadeDetalhe } from '@/types'
 import { formatarLaje, formatarNomeEdificio } from '@/lib/constants'
 
@@ -23,22 +23,62 @@ export default function DashboardPage() {
   const [edificioFiltro, setEdificioFiltro] = useState<number | null>(null)
   const [buscaEdificio, setBuscaEdificio] = useState('')
   const [showEdificios, setShowEdificios] = useState(false)
+  const [comandoEdificios, setComandoEdificios] = useState<{ versao: number; recolher: boolean }>({ versao: 0, recolher: true })
+  const [atividadeFocoId, setAtividadeFocoId] = useState<number | null>(null)
   const [detalheAtividade, setDetalheAtividade] = useState<AtividadeDetalhe | null>(null)
   const [detalheAberto, setDetalheAberto] = useState(false)
   const ultimoFiltroAutomaticoRef = useRef<number | null>(null)
+  const ultimoFocoAutomaticoRef = useRef<number | null>(null)
+  const filtroDropdownRef = useRef<HTMLDivElement | null>(null)
+  const carregamentoEmAndamentoRef = useRef(false)
+
+  const withTimeout = async <T,>(promise: Promise<T>, ms: number, message: string): Promise<T> => {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const timeoutPromise = new Promise<T>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), ms)
+    })
+    try {
+      return await Promise.race([promise, timeoutPromise])
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
+  }
 
   const carregarEdificios = async () => {
+    if (carregamentoEmAndamentoRef.current) return
+    carregamentoEmAndamentoRef.current = true
     setCarregando(true)
     try {
-      const lista = await api.get<{ id: number; nome: string }[]>('/edificios/')
-      const estruturas = await Promise.all(
-        lista.map(ed => api.get<EdificioCompleto>(`/edificios/${ed.id}/estrutura`))
+      // Caminho otimizado: uma chamada para todas as estruturas.
+      const estruturas = await withTimeout(
+        api.get<EdificioCompleto[]>('/edificios/estruturas'),
+        12000,
+        'Tempo esgotado ao carregar estruturas dos edifícios',
       )
       setEdificios(estruturas)
-    } catch (e) {
-      console.error('Erro ao carregar edifícios', e)
+    } catch (e: any) {
+      try {
+        // Fallback legado para manter robustez em ambientes sem endpoint agregado.
+        const lista = await withTimeout(
+          api.get<{ id: number; nome: string }[]>('/edificios/'),
+          12000,
+          'Tempo esgotado ao carregar edifícios',
+        )
+        const estruturas = await Promise.all(
+          lista.map(ed => withTimeout(
+            api.get<EdificioCompleto>(`/edificios/${ed.id}/estrutura`),
+            12000,
+            `Tempo esgotado ao carregar estrutura do edifício ${ed.id}`,
+          ))
+        )
+        setEdificios(estruturas)
+      } catch (fallbackErr: any) {
+        console.error('Erro ao carregar edifícios', fallbackErr)
+        addToast(fallbackErr?.message || e?.message || 'Erro ao carregar edifícios', 'erro')
+      }
     } finally {
       setCarregando(false)
+      carregamentoEmAndamentoRef.current = false
     }
   }
 
@@ -48,13 +88,58 @@ export default function DashboardPage() {
   }, [usuario])
 
   useEffect(() => {
-    const raw = localStorage.getItem('dashboard_edificio_filtro')
-    if (!raw) return
-    const edificioId = Number(raw)
+    // Estado inicial do dashboard de funcionario: todos os edificios recolhidos.
+    setComandoEdificios({ versao: 1, recolher: true })
+  }, [])
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const rawEdificio = params.get('edificio_id') ?? localStorage.getItem('dashboard_edificio_filtro')
+    if (!rawEdificio) return
+    const edificioId = Number(rawEdificio)
     localStorage.removeItem('dashboard_edificio_filtro')
     if (!Number.isFinite(edificioId) || edificioId <= 0) return
     setEdificioFiltro(edificioId)
     ultimoFiltroAutomaticoRef.current = edificioId
+  }, [])
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const rawAtividade = params.get('atividade_id') ?? localStorage.getItem('dashboard_atividade_foco')
+    if (!rawAtividade) return
+    const atividadeId = Number(rawAtividade)
+    localStorage.removeItem('dashboard_atividade_foco')
+    if (!Number.isFinite(atividadeId) || atividadeId <= 0) return
+    if (ultimoFocoAutomaticoRef.current === atividadeId) return
+    ultimoFocoAutomaticoRef.current = atividadeId
+    setAtividadeFocoId(atividadeId)
+  }, [])
+
+  useEffect(() => {
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (!showEdificios) return
+      const alvo = event.target as Node
+      if (filtroDropdownRef.current?.contains(alvo)) return
+      setShowEdificios(false)
+    }
+
+    document.addEventListener('mousedown', handleOutsideClick)
+    return () => document.removeEventListener('mousedown', handleOutsideClick)
+  }, [showEdificios])
+
+  useEffect(() => {
+    const handleFocoSidebar = (event: Event) => {
+      const custom = event as CustomEvent<{ atividadeId: number; edificioId?: number }>
+      const atividadeId = custom.detail?.atividadeId
+      const edificioId = custom.detail?.edificioId
+      if (!atividadeId) return
+      focarAtividade(atividadeId, edificioId)
+    }
+
+    window.addEventListener('dashboard:focar-atividade', handleFocoSidebar as EventListener)
+    return () => {
+      window.removeEventListener('dashboard:focar-atividade', handleFocoSidebar as EventListener)
+    }
   }, [])
 
   useEffect(() => {
@@ -75,8 +160,14 @@ export default function DashboardPage() {
     try {
       switch (tipo) {
         case 'iniciar':       await iniciarSessao(atividadeId);   break
-        case 'pausar':        await pausarSessao();               break
-        case 'retomar':       await retomarSessao(atividadeId);   break
+        case 'pausar':
+          setAtividadeFocoId(atividadeId)
+          await pausarSessao()
+          break
+        case 'retomar':
+          setAtividadeFocoId(atividadeId)
+          await retomarSessao(atividadeId)
+          break
         case 'avancar_etapa': await avancarEtapa(atividadeId);    break
         case 'finalizar':     await finalizarAtividade(atividadeId); break
       }
@@ -96,6 +187,14 @@ export default function DashboardPage() {
     }
   }
 
+  const focarAtividade = (atividadeId: number, edificioId?: number) => {
+    if (edificioId && Number.isFinite(edificioId) && edificioId > 0) {
+      setEdificioFiltro(edificioId)
+      ultimoFiltroAutomaticoRef.current = edificioId
+    }
+    setAtividadeFocoId(atividadeId)
+  }
+
   const atividadeEmAndamentoId = atividadeAtiva?.id ?? null
   const nomeExibicaoEdificio = (edificio: EdificioCompleto) => formatarNomeEdificio(edificio)
   const edificioSelecionado = edificios.find(e => e.id === edificioFiltro)
@@ -109,12 +208,38 @@ export default function DashboardPage() {
           lajeTipo={formatarLaje(atividadeAtiva.laje?.tipo ?? 'Laje')}
           edificioNome={formatarNomeEdificio(atividadeAtiva.laje?.edificio)}
           onPausar={pausarSessao}
+          onIrParaAtividade={focarAtividade}
           onAbrirDetalhe={abrirDetalhe}
         />
       )}
 
       <PageHeader
-        titulo="Minhas atividades"
+        titulo={
+          <button
+            onClick={() => {
+              setEdificioFiltro(null)
+              setShowEdificios(false)
+              setBuscaEdificio('')
+              setComandoEdificios(prev => ({ versao: prev.versao + 1, recolher: true }))
+            }}
+            style={{
+              border: 'none',
+              background: 'transparent',
+              color: 'var(--texto-principal)',
+              fontFamily: "'Barlow Condensed', sans-serif",
+              fontSize: '26px',
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.03em',
+              margin: 0,
+              padding: 0,
+              cursor: 'pointer',
+            }}
+            title="Mostrar todos os edifícios"
+          >
+            Minhas atividades
+          </button>
+        }
         subtitulo="Árvore de tarefas por edifício e pavimento"
       />
 
@@ -123,14 +248,13 @@ export default function DashboardPage() {
         {/* Filtros */}
         <div style={{ display: 'flex', gap: '12px', alignItems: 'stretch' }}>
           {/* Filtro por edifício (Searchable Dropdown) */}
-          <div 
+          <div
+            ref={filtroDropdownRef}
             style={{ 
               position: 'relative', 
               minWidth: '240px',
-              paddingBottom: '8px',
-              marginBottom: '-8px'
+              marginBottom: 0,
             }}
-            onMouseLeave={() => setShowEdificios(false)}
           >
             <div style={{
               background: 'var(--superficie-1)', padding: '12px 16px', borderRadius: '8px',
@@ -150,7 +274,7 @@ export default function DashboardPage() {
             {showEdificios && (
               <div style={{
                 position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100,
-                marginTop: '4px', background: 'white', borderRadius: '8px',
+                marginTop: '0', background: 'white', borderRadius: '8px',
                 border: '1px solid var(--cinza-300)', boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
                 display: 'flex', flexDirection: 'column',
               }}>
@@ -203,6 +327,34 @@ export default function DashboardPage() {
             )}
           </div>
 
+          {edificioFiltro === null && (
+            <button
+              onClick={() => {
+                setComandoEdificios(prev => ({ versao: prev.versao + 1, recolher: !prev.recolher }))
+              }}
+              style={{
+                background: 'var(--superficie-1)',
+                border: '1px solid var(--cinza-300)',
+                borderRadius: '8px',
+                padding: '12px 16px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                cursor: 'pointer',
+                color: 'var(--cinza-800)',
+                fontSize: '12px',
+                fontWeight: 700,
+                fontFamily: "'Barlow Condensed', sans-serif",
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+              }}
+              title={comandoEdificios.recolher ? 'Expandir todos os edifícios' : 'Recolher todos os edifícios'}
+            >
+              {comandoEdificios.recolher ? <ChevronsDown size={14} /> : <ChevronsRight size={14} />}
+              {comandoEdificios.recolher ? 'Expandir edifícios' : 'Recolher edifícios'}
+            </button>
+          )}
+
           {/* Filtro por texto */}
           <div style={{
             flex: 1, background: 'var(--superficie-1)', padding: '12px 16px', borderRadius: '8px',
@@ -250,6 +402,11 @@ export default function DashboardPage() {
                 atividadeEmAndamentoId={atividadeEmAndamentoId}
                 onAcao={handleAcao}
                 filtroTexto={busca}
+                onDetalhe={abrirDetalhe}
+                atividadeFocoId={atividadeFocoId}
+                iniciarRecolhido
+                comandoEdificioGlobal={edificioFiltro === null ? comandoEdificios : null}
+                ocultarSemPavimentosNoFiltro
               />
             ))}
           </div>
@@ -260,6 +417,10 @@ export default function DashboardPage() {
         isOpen={detalheAberto}
         onClose={() => { setDetalheAberto(false); setDetalheAtividade(null) }}
         detalhe={detalheAtividade}
+        onAtualizou={async () => {
+          await refreshSessao()
+          await carregarEdificios()
+        }}
       />
     </>
   )

@@ -29,8 +29,9 @@ import {
   ClipboardList,
   ChevronsLeft,
   ChevronsRight,
+  Info,
 } from 'lucide-react'
-import type { Atividade, AtividadeDetalhe, ProximosStatusAtividade, SessaoTrabalho, StatusAtividade } from '@/types'
+import type { Atividade, AtividadeDetalhe, ProximosStatusAtividade, StatusAtividade } from '@/types'
 
 export function Sidebar() {
   const pathname = usePathname()
@@ -40,9 +41,7 @@ export function Sidebar() {
   const { addToast } = useToast()
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
   const [atividades, setAtividades] = useState<Atividade[]>([])
-  const [sessoes, setSessoes] = useState<SessaoTrabalho[]>([])
   const [carregandoSecao, setCarregandoSecao] = useState(false)
-  const [proximosStatusPorAtividade, setProximosStatusPorAtividade] = useState<Record<number, StatusAtividade[]>>({})
   const [opcoesAvanco, setOpcoesAvanco] = useState<StatusAtividade[]>([])
   const [atividadeAvanco, setAtividadeAvanco] = useState<Atividade | null>(null)
   const [statusSelecionado, setStatusSelecionado] = useState<StatusAtividade | ''>('')
@@ -97,31 +96,8 @@ export function Sidebar() {
     if (!usuario || usuario.role !== 'funcionario') return
     setCarregandoSecao(true)
     try {
-      const [ativs, sess] = await Promise.all([
-        api.get<Atividade[]>('/atividades/'),
-        api.get<SessaoTrabalho[]>(`/sessoes/?usuario_id=${usuario.usuario_id}`),
-      ])
+      const ativs = await api.get<Atividade[]>('/atividades/')
       setAtividades(ativs)
-      setSessoes(sess)
-
-      const candidatas = ativs.filter(a => {
-        return a.status_ciclo !== 'Finalizada'
-      })
-
-      const resultados = await Promise.allSettled(
-        candidatas.map(async atividade => {
-          const data = await api.get<ProximosStatusAtividade>(`/atividades/${atividade.id}/proximos-status`)
-          return { id: atividade.id, opcoes: data.opcoes }
-        })
-      )
-
-      const mapa: Record<number, StatusAtividade[]> = {}
-      for (const resultado of resultados) {
-        if (resultado.status === 'fulfilled') {
-          mapa[resultado.value.id] = resultado.value.opcoes
-        }
-      }
-      setProximosStatusPorAtividade(mapa)
     } catch {
       addToast('Erro ao carregar tarefas da barra lateral', 'erro')
     } finally {
@@ -137,31 +113,23 @@ export function Sidebar() {
 
   const obterLabelAvanco = (atividadeId: number) => {
     const atividade = atividades.find(a => a.id === atividadeId)
-    if (!atividade) return 'Avançar'
+    if (!atividade) return 'Concluir etapa'
 
     if ((atividade.status_ciclo === 'Em andamento' || atividade.status_ciclo === 'Pausada')
       && atividade.etapa_atual >= atividade.etapa_total) {
       return 'Finalizar'
     }
 
-    const opcoes = proximosStatusPorAtividade[atividadeId] || []
-    if (opcoes.length === 1) return 'Avançar'
-    if (opcoes.length > 1) return 'Avançar'
-    return 'Avançar'
+    return 'Concluir etapa'
   }
 
   const podeMostrarAvanco = (atividadeId: number) => {
-    const opcoes = proximosStatusPorAtividade[atividadeId] || []
-    return opcoes.length > 0
+    const atividade = atividades.find(a => a.id === atividadeId)
+    if (!atividade) return false
+    return atividade.status_ciclo === 'Em andamento' || atividade.status_ciclo === 'Pausada'
   }
 
-  const idsAtividadesComSessaoPropria = new Set(sessoes.map(s => s.atividade_id))
-
-  const tarefasRelevantes = atividades.filter(a => {
-    const jaTocou = idsAtividadesComSessaoPropria.has(a.id)
-    const emAndamentoOuPausada = a.status_ciclo === 'Em andamento' || a.status_ciclo === 'Pausada'
-    return jaTocou && emAndamentoOuPausada
-  })
+  const tarefasRelevantes = atividades.filter(a => a.usuario_responsavel_id === usuario.usuario_id)
 
   const tarefasPorStatus = [
     { 
@@ -171,6 +139,14 @@ export function Sidebar() {
     { 
       status: 'Pausadas', 
       lista: tarefasRelevantes.filter(t => t.status_ciclo === 'Pausada') 
+    },
+    {
+      status: 'Etapa concluida',
+      lista: tarefasRelevantes.filter(t => t.status_ciclo === 'Etapa concluida')
+    },
+    {
+      status: 'Pendentes',
+      lista: tarefasRelevantes.filter(t => t.status_ciclo === 'Pendente')
     },
   ].filter(g => g.lista.length > 0)
 
@@ -229,6 +205,23 @@ export function Sidebar() {
     } catch {
       addToast('Erro ao avançar atividade', 'erro')
     }
+  }
+
+  const irParaDashboardComAtividade = (atividade: Atividade) => {
+    const edificioId = atividade.laje?.edificio?.id
+    const focoPayload = { atividadeId: atividade.id, edificioId }
+
+    // Mesmo comportamento do banner: se já estiver no dashboard, foca sem depender de remount.
+    if (pathname?.startsWith('/dashboard')) {
+      window.dispatchEvent(new CustomEvent('dashboard:focar-atividade', { detail: focoPayload }))
+      return
+    }
+
+    if (edificioId) {
+      localStorage.setItem('dashboard_edificio_filtro', String(edificioId))
+    }
+    localStorage.setItem('dashboard_atividade_foco', String(atividade.id))
+    router.push(`/dashboard?atividade_id=${atividade.id}${edificioId ? `&edificio_id=${edificioId}` : ''}`)
   }
 
   const W_EXPANDED = 320
@@ -471,7 +464,18 @@ export function Sidebar() {
               /* Grupos por status */
               tarefasPorStatus.map(grupo => {
                 const emAndamento = grupo.status === 'Em andamento'
-                const corGrupo = emAndamento ? 'var(--verde-principal)' : '#f59e0b'
+                const etapaConcluida = grupo.status === 'Etapa concluida'
+                const pendente = grupo.status === 'Pendentes'
+                const finalizada = grupo.status === 'Finalizadas'
+                const corGrupo = emAndamento
+                  ? 'var(--verde-principal)'
+                  : etapaConcluida
+                    ? '#2563eb'
+                    : pendente
+                      ? 'var(--cinza-500)'
+                      : finalizada
+                        ? '#6366f1'
+                        : '#f59e0b'
                 return (
                   <div key={grupo.status} style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
                     {/* Header do grupo */}
@@ -505,7 +509,7 @@ export function Sidebar() {
                     {grupo.lista.map(atividade => {
                       const ativa = sessaoAtiva?.atividade_id === atividade.id
                       const pct = Math.round((atividade.etapa_atual / atividade.etapa_total) * 100)
-                      const podeRetomar = atividade.status_ciclo === 'Pausada' && (!sessaoAtiva || ativa)
+                      const podeRetomar = (atividade.status_ciclo === 'Pausada' || atividade.status_ciclo === 'Etapa concluida') && (!sessaoAtiva || ativa)
                       const isFinalizar = atividade.etapa_atual >= atividade.etapa_total
                       const usuarioVinculado = atividade.usuario_responsavel?.nome
                         || (atividade.usuario_responsavel_id ? `#${atividade.usuario_responsavel_id}` : 'Sem vínculo')
@@ -515,6 +519,7 @@ export function Sidebar() {
                       return (
                         <div
                           key={atividade.id}
+                          onClick={() => irParaDashboardComAtividade(atividade)}
                           style={{
                             background: 'var(--superficie-1)',
                             borderTop: `1px solid ${ativa ? 'rgba(90,138,74,0.45)' : 'var(--cinza-300)'}`,
@@ -527,38 +532,61 @@ export function Sidebar() {
                             flexDirection: 'column',
                             gap: '8px',
                             minHeight: '140px',
+                            cursor: 'pointer',
                           }}
                         >
                           {/* Linha 1: tipo + badge status */}
                           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '4px' }}>
-                            <button
-                              onClick={() => abrirDetalhe(atividade.id)}
-                              title="Ver detalhes"
+                            <span
                               style={{
-                                border: 'none', background: 'none',
                                 color: 'var(--cinza-800)',
                                 fontSize: '12px', fontWeight: 700,
-                                textAlign: 'left', cursor: 'pointer',
-                                padding: 0, lineHeight: '1.3',
+                                textAlign: 'left',
+                                lineHeight: '1.3',
                                 fontFamily: "'DM Sans', sans-serif",
                               }}
                             >
                               {formatarTipoElemento(atividade.tipo_elemento, atividade.subtipo)}
-                            </button>
-                            {ativa && (
-                              <span style={{
-                                flexShrink: 0,
-                                background: 'rgba(90,138,74,0.2)',
-                                color: 'var(--verde-principal)',
-                                fontSize: '10px', fontWeight: 700,
-                                borderRadius: '4px', padding: '1px 5px',
-                                fontFamily: "'Barlow Condensed', sans-serif",
-                                textTransform: 'uppercase', letterSpacing: '0.05em',
-                                lineHeight: '14px',
-                              }}>
-                                Ativo
-                              </span>
-                            )}
+                            </span>
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  abrirDetalhe(atividade.id)
+                                }}
+                                aria-label="Ver detalhes da tarefa"
+                                title="Ver detalhes"
+                                style={{
+                                  width: '18px',
+                                  height: '18px',
+                                  borderRadius: '999px',
+                                  border: '1px solid var(--cinza-300)',
+                                  background: 'var(--superficie-2)',
+                                  color: 'var(--cinza-700)',
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  padding: 0,
+                                }}
+                              >
+                                <Info size={11} />
+                              </button>
+                              {ativa && (
+                                <span style={{
+                                  flexShrink: 0,
+                                  background: 'rgba(90,138,74,0.2)',
+                                  color: 'var(--verde-principal)',
+                                  fontSize: '10px', fontWeight: 700,
+                                  borderRadius: '4px', padding: '1px 5px',
+                                  fontFamily: "'Barlow Condensed', sans-serif",
+                                  textTransform: 'uppercase', letterSpacing: '0.05em',
+                                  lineHeight: '14px',
+                                }}>
+                                  Ativo
+                                </span>
+                              )}
+                            </div>
                           </div>
 
                           {/* Linha 2: edifício + laje */}
@@ -618,16 +646,18 @@ export function Sidebar() {
                             flexWrap: 'wrap',
                             minHeight: '28px',
                           }}>
-                            {atividade.status_ciclo === 'Pausada' && (
+                            {(atividade.status_ciclo === 'Pausada' || atividade.status_ciclo === 'Etapa concluida') && (
                               <button
-                                onClick={() => {
+                                onClick={(e) => {
+                                  e.stopPropagation()
                                   const fn = async () => {
                                     const edificioId = atividade.laje?.edificio?.id
                                     if (edificioId) {
                                       localStorage.setItem('dashboard_edificio_filtro', String(edificioId))
                                     }
+                                    localStorage.setItem('dashboard_atividade_foco', String(atividade.id))
                                     await retomarSessao(atividade.id)
-                                    if (pathname !== '/dashboard') router.push('/dashboard')
+                                    router.push(`/dashboard?atividade_id=${atividade.id}${edificioId ? `&edificio_id=${edificioId}` : ''}`)
                                   }
                                   fn().catch(() => {})
                                 }}
@@ -654,7 +684,19 @@ export function Sidebar() {
 
                             {ativa && atividade.status_ciclo === 'Em andamento' && (
                               <button
-                                onClick={() => { pausarSessao().catch(() => {}) }}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  const fn = async () => {
+                                    const edificioId = atividade.laje?.edificio?.id
+                                    if (edificioId) {
+                                      localStorage.setItem('dashboard_edificio_filtro', String(edificioId))
+                                    }
+                                    localStorage.setItem('dashboard_atividade_foco', String(atividade.id))
+                                    await pausarSessao()
+                                    router.push(`/dashboard?atividade_id=${atividade.id}${edificioId ? `&edificio_id=${edificioId}` : ''}`)
+                                  }
+                                  fn().catch(() => {})
+                                }}
                                 style={{
                                   display: 'inline-flex', alignItems: 'center', gap: '4px',
                                   border: '1px solid rgba(245,158,11,0.4)',
@@ -674,7 +716,10 @@ export function Sidebar() {
 
                             {podeMostrarAvanco(atividade.id) && (
                               <button
-                                onClick={() => { solicitarAvanco(atividade).catch(() => {}) }}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  solicitarAvanco(atividade).catch(() => {})
+                                }}
                                 style={{
                                   display: 'inline-flex', alignItems: 'center', gap: '4px',
                                   border: `1px solid ${isFinalizar ? 'rgba(99,102,241,0.4)' : 'var(--sidebar-borda)'}`,
@@ -710,7 +755,7 @@ export function Sidebar() {
       <div style={{
         padding: collapsed ? '12px 8px' : '14px 14px',
         borderTop: '1px solid var(--sidebar-borda)',
-        background: 'rgba(0,0,0,0.18)',
+        background: 'var(--sidebar-bg)',
         display: 'flex',
         flexDirection: 'column',
         gap: '8px',
@@ -828,7 +873,7 @@ export function Sidebar() {
                 fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em',
                 transition: 'all 150ms ease',
               }}
-              onMouseOver={e => e.currentTarget.style.background = 'rgba(255,255,255,0.12)'}
+              onMouseOver={e => e.currentTarget.style.background = 'var(--sidebar-hover)'}
               onMouseOut={e => e.currentTarget.style.background = 'var(--sidebar-hover)'}
             >
               <UserRound size={13} />
@@ -880,6 +925,7 @@ export function Sidebar() {
           setDetalhe(null)
         }}
         detalhe={detalhe}
+        onAtualizou={carregarSecaoFuncionario}
       />
     </aside>
   )

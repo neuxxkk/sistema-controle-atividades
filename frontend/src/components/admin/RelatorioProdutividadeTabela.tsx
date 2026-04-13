@@ -1,8 +1,8 @@
 'use client'
-import React, { useRef, useState } from 'react'
+import React, { useMemo, useRef, useState } from 'react'
 import { useReactToPrint } from 'react-to-print'
 import { Download, Printer, Settings2 } from 'lucide-react'
-import { nomeEtapa } from '@/lib/constants'
+import { formatarLaje, nomeEtapa } from '@/lib/constants'
 import type { ItemRelatorio } from '@/types'
 
 interface Props {
@@ -11,6 +11,7 @@ interface Props {
 }
 
 type ColunaID = 'pavimento' | 'tarefa' | 'etapa' | 'status' | 'total' | 'contribuicoes'
+type LinhaRelatorio = ItemRelatorio & { _unificada?: boolean }
 
 export function RelatorioProdutividadeTabela({ dados, nomeEdificio }: Props) {
   const contentRef = useRef<HTMLDivElement>(null)
@@ -23,6 +24,7 @@ export function RelatorioProdutividadeTabela({ dados, nomeEdificio }: Props) {
     contribuicoes: true
   })
   const [showConfig, setShowConfig] = useState(false)
+  const [unificarRelatorio, setUnificarRelatorio] = useState(false)
 
   const handlePrint = useReactToPrint({
     contentRef,
@@ -35,6 +37,54 @@ export function RelatorioProdutividadeTabela({ dados, nomeEdificio }: Props) {
     // Pega a primeira palavra (ex: "Elaboração Inicial" -> "Elaboração")
     return nomeCompleto.split(' ')[0]
   }
+
+  const dadosTabela = useMemo<LinhaRelatorio[]>(() => {
+    if (!unificarRelatorio) return dados
+
+    const agrupado = new Map<string, ItemRelatorio[]>()
+    for (const item of dados) {
+      const atual = agrupado.get(item.laje) ?? []
+      atual.push(item)
+      agrupado.set(item.laje, atual)
+    }
+
+    const resultado: LinhaRelatorio[] = []
+    for (const item of dados) {
+      const grupo = agrupado.get(item.laje)
+      if (!grupo) continue
+
+      const statusUnicos = new Set(grupo.map(g => g.status))
+      const statusDoGrupo = grupo[0]?.status ?? ''
+      const podeUnificar = statusUnicos.size === 1 && (statusDoGrupo === 'Pendente' || statusDoGrupo === 'Finalizada')
+
+      if (podeUnificar) {
+        const horasTotais = grupo.reduce((acc, atual) => acc + atual.horas_totais, 0)
+        const contribMap = new Map<string, number>()
+        for (const g of grupo) {
+          for (const c of g.contribuicoes) {
+            contribMap.set(c.usuario, (contribMap.get(c.usuario) ?? 0) + c.horas)
+          }
+        }
+
+        const contribuicoes = Array.from(contribMap.entries()).map(([usuario, horas]) => ({ usuario, horas }))
+        const base = grupo[0]
+
+        resultado.push({
+          ...base,
+          tarefa: 'Todas',
+          horas_totais: horasTotais,
+          contribuicoes,
+          _unificada: true,
+        })
+      } else {
+        resultado.push(...grupo)
+      }
+
+      agrupado.delete(item.laje)
+    }
+
+    return resultado
+  }, [dados, unificarRelatorio])
 
   const exportToXLSX = async () => {
     try {
@@ -75,11 +125,11 @@ export function RelatorioProdutividadeTabela({ dados, nomeEdificio }: Props) {
       ]
 
       // Adicionar linhas de dados
-      dados.forEach(item => {
+      dadosTabela.forEach(item => {
         wsData.push([
-          { v: item.laje, s: cellStyle },
+          { v: formatarLaje(item.laje), s: cellStyle },
           { v: item.tarefa, s: { ...cellStyle, font: { ...cellStyle.font, bold: true } } },
-          { v: getEtapaCurta(item), s: cellStyle },
+          { v: item._unificada ? '—' : getEtapaCurta(item), s: cellStyle },
           { v: item.status, s: { ...cellStyle, alignment: { horizontal: "center" } } },
           { v: item.horas_totais, s: { ...cellStyle, alignment: { horizontal: "right" }, numFmt: "0.00" } },
           { v: item.contribuicoes.map(c => `${c.usuario}: ${c.horas.toFixed(2)}h`).join('; '), s: cellStyle }
@@ -130,6 +180,7 @@ export function RelatorioProdutividadeTabela({ dados, nomeEdificio }: Props) {
     if (status === 'Finalizada') return { ...base, background: 'var(--verde-claro)', color: 'var(--verde-texto)', borderColor: 'var(--verde-principal)' }
     if (status === 'Em andamento') return { ...base, background: '#e6f1fb', color: '#185fa5', borderColor: '#185fa5' }
     if (status === 'Pausada') return { ...base, background: '#fef3c7', color: '#f59e0b', borderColor: '#f59e0b' }
+    if (status === 'Etapa concluida') return { ...base, background: '#dbeafe', color: '#2563eb', borderColor: '#2563eb' }
     return { ...base, background: 'var(--status-pendente-bg)', color: 'var(--status-pendente-text)', borderColor: 'var(--cinza-300)' }
   }
 
@@ -164,6 +215,10 @@ export function RelatorioProdutividadeTabela({ dados, nomeEdificio }: Props) {
               <span style={{ textTransform: 'capitalize' }}>{id}</span>
             </label>
           ))}
+          <label style={CONFIG_LABEL_STYLE}>
+            <input type="checkbox" checked={unificarRelatorio} onChange={(e) => setUnificarRelatorio(e.target.checked)} />
+            <span>Unificar por pavimento (pendente/finalizada)</span>
+          </label>
         </div>
       )}
 
@@ -191,11 +246,11 @@ export function RelatorioProdutividadeTabela({ dados, nomeEdificio }: Props) {
             </tr>
           </thead>
           <tbody>
-            {dados.map((item) => (
+            {dadosTabela.map((item) => (
               <tr key={item.id} style={{ borderBottom: '1px solid var(--cinza-100)' }}>
-                {colunasVisiveis.pavimento && <td style={TD_STYLE}>{item.laje}</td>}
+                {colunasVisiveis.pavimento && <td style={TD_STYLE}>{formatarLaje(item.laje)}</td>}
                 {colunasVisiveis.tarefa && <td style={{ ...TD_STYLE, fontWeight: 700, color: 'var(--cinza-900)' }}>{item.tarefa}</td>}
-                {colunasVisiveis.etapa && <td style={TD_STYLE}>{getEtapaCurta(item)}</td>}
+                {colunasVisiveis.etapa && <td style={TD_STYLE}>{item._unificada ? '—' : getEtapaCurta(item)}</td>}
                 {colunasVisiveis.status && (
                   <td style={TD_STYLE}>
                     <span style={getStatusStyle(item.status)}>{item.status}</span>

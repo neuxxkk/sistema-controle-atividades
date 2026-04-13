@@ -2,8 +2,8 @@
 import React from 'react'
 
 interface Props {
-  titulo: string
-  subtitulo?: string
+  titulo: React.ReactNode
+  subtitulo?: React.ReactNode
   acoes?: React.ReactNode
 }
 
