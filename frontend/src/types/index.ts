@@ -65,7 +65,7 @@ export type StatusAtividade =
   | 'Fazendo' | 'Pausado' | 'Ok' | 'Atendendo comentarios'
 
 // Novo ciclo de vida canônico
-export type StatusCiclo = 'Pendente' | 'Em andamento' | 'Pausada' | 'Finalizada'
+export type StatusCiclo = 'Pendente' | 'Em andamento' | 'Pausada' | 'Etapa concluida' | 'Finalizada'
 
 export type AcaoAtividade = 'iniciar' | 'pausar' | 'retomar' | 'avancar_etapa' | 'finalizar'
 

@@ -162,16 +162,17 @@ async def pausar(atividade: models.Atividade, usuario_id: int, db: AsyncSession)
 async def retomar(atividade: models.Atividade, usuario_id: int, db: AsyncSession) -> models.Atividade:
     """
     Pré-condições:
-      - status_ciclo == Pausada
-      - Funcionário não possui outra tarefa Em andamento
-      - (Roubo de vínculo permitido quando Pausada)
+        - status_ciclo == Pausada OU Etapa concluida
+        - Funcionário não possui outra tarefa Em andamento
+        - (Roubo de vínculo permitido quando Pausada)
+
     Efeitos:
       - status_ciclo → Em andamento
       - Atualiza vínculo para o usuário atual
       - Abre nova sessão de trabalho
     """
-    if atividade.status_ciclo != "Pausada":
-        raise HTTPException(400, f"Retomar requer status Pausada. Atual: {atividade.status_ciclo}")
+    if atividade.status_ciclo not in {"Pausada", "Etapa concluida"}:
+        raise HTTPException(400, f"Retomar requer status Pausada ou Etapa concluida. Atual: {atividade.status_ciclo}")
 
     sessao_aberta = await _sessao_ativa_usuario(usuario_id, db)
     if sessao_aberta and sessao_aberta.atividade_id != atividade.id:
@@ -196,27 +197,35 @@ async def avancar_etapa(atividade: models.Atividade, usuario_id: int, db: AsyncS
     """
     Pré-condições:
       - Não está na última etapa
-      - status_ciclo == Pausada (qualquer funcionário) OU Em andamento (próprio vinculado)
+    - status_ciclo == Pausada OU Em andamento
+    - Usuário atual precisa estar vinculado à tarefa
     Efeitos:
       - etapa_atual += 1
-      - Mantém status_ciclo
-      - Registra histórico de etapa
+      - Desvincula o usuário atual
+      - Fecha sessão ativa (se houver)
+      - status_ciclo → Etapa concluida
+      - Registra histórico de conclusão de etapa
     """
     if atividade.etapa_atual >= atividade.etapa_total:
         raise HTTPException(400, "Já está na última etapa. Use Finalizar.")
 
     pode = (
-        atividade.status_ciclo == "Pausada"
-        or (atividade.status_ciclo == "Em andamento" and atividade.usuario_responsavel_id == usuario_id)
+        atividade.status_ciclo in {"Pausada", "Em andamento"}
+        and atividade.usuario_responsavel_id == usuario_id
     )
     if not pode:
-        raise HTTPException(403, "Avançar etapa requer: Pausada (qualquer) ou Em andamento (próprio vinculado).")
+        raise HTTPException(403, "Concluir etapa requer tarefa Pausada/Em andamento e vínculo com o usuário atual.")
 
     etapa_ant = atividade.etapa_atual
+    status_ant = atividade.status_ciclo
+    await _fechar_sessao_ativa(atividade.id, db)
     atividade.etapa_atual += 1
+    atividade.status_ciclo = "Etapa concluida"
+    atividade.status_atual = "Pendente"
+    atividade.usuario_responsavel_id = None
     atividade.atualizado_em = _agora()
 
-    _registrar_historico(db, atividade, usuario_id, "avancar_etapa", atividade.status_ciclo, atividade.status_ciclo, etapa_ant, atividade.etapa_atual)
+    _registrar_historico(db, atividade, usuario_id, "concluir_etapa", status_ant, "Etapa concluida", etapa_ant, atividade.etapa_atual)
     return atividade
 
 
@@ -279,8 +288,14 @@ def acoes_disponiveis(
         acoes = []
         if not tem_outra_em_andamento:
             acoes.append("retomar")
-        acoes.append("finalizar" if ultima else "avancar_etapa")
+        if ultima:
+            acoes.append("finalizar")
+        elif vinculado:
+            acoes.append("avancar_etapa")
         return acoes
+
+    if s == "Etapa concluida":
+        return [] if tem_outra_em_andamento else ["retomar"]
 
     return []  # Finalizada
 

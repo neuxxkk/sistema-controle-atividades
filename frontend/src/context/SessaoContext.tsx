@@ -98,7 +98,7 @@ export function SessaoProvider({ children }: { children: React.ReactNode }) {
     try {
       await api.post(`/atividades/${atividadeId}/avancar-etapa?usuario_id=${usuario.usuario_id}`, {})
       await refreshSessao()
-      addToast('Etapa avançada!', 'sucesso')
+      addToast('Etapa concluida!', 'sucesso')
     } catch (error: any) {
       addToast(error.message || 'Erro ao avançar etapa', 'erro')
       throw error

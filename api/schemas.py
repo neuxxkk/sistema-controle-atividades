@@ -11,7 +11,7 @@ StatusAtividade = Literal[
 ]
 
 # Novo ciclo de vida canônico
-StatusCiclo = Literal["Pendente", "Em andamento", "Pausada", "Finalizada"]
+StatusCiclo = Literal["Pendente", "Em andamento", "Pausada", "Etapa concluida", "Finalizada"]
 
 AcaoAtividade = Literal["iniciar", "pausar", "retomar", "avancar_etapa", "finalizar"]
 
@@ -94,8 +94,12 @@ class EdificioBase(BaseModel):
     nome: str
     descricao: Optional[str] = None
 
+class LajePersonalizadaCreate(BaseModel):
+    tipo: str
+
 class EdificioCreate(EdificioBase):
     num_pavimentos: int
+    lajes_customizadas: Optional[List[LajePersonalizadaCreate]] = None
 
 class Edificio(EdificioBase):
     id: int
@@ -118,6 +122,20 @@ class Laje(LajeBase):
     criado_em: datetime
     edificio: Optional[Edificio] = None
     model_config = ConfigDict(from_attributes=True)
+
+
+class LajeCreateRequest(BaseModel):
+    tipo: str
+    ordem: Optional[int] = None
+
+
+class LajeUpdateRequest(BaseModel):
+    tipo: Optional[str] = None
+    ordem: Optional[int] = None
+
+
+class LajeBulkDeleteRequest(BaseModel):
+    laje_ids: List[int]
 
 # --- Atividade ---
 class AtividadeBase(BaseModel):

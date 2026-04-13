@@ -21,6 +21,7 @@ export const LABEL_STATUS_CICLO: Record<StatusCiclo, string> = {
   'Pendente':     'Pendente',
   'Em andamento': 'Em andamento',
   'Pausada':      'Pausada',
+  'Etapa concluida': 'Etapa concluida',
   'Finalizada':   'Finalizada',
 }
 
@@ -28,6 +29,7 @@ export const COR_STATUS_CICLO: Record<StatusCiclo, string> = {
   'Pendente':     'var(--cinza-400)',
   'Em andamento': 'var(--verde-principal)',
   'Pausada':      '#f59e0b',
+  'Etapa concluida': '#2563eb',
   'Finalizada':   '#6366f1',
 }
 
@@ -35,7 +37,7 @@ export const LABEL_ACAO: Record<AcaoAtividade, string> = {
   iniciar:       'Iniciar',
   pausar:        'Pausar',
   retomar:       'Retomar',
-  avancar_etapa: 'Av. Etapa',
+  avancar_etapa: 'Concluir etapa',
   finalizar:     'Finalizar',
 }
 
@@ -74,8 +76,17 @@ export function calcularAcoes(
   if (status_ciclo === 'Pausada') {
     const acoes: AcaoAtividade[] = []
     if (!temOutraEmAndamento || modoAdmin) acoes.push('retomar')
-    acoes.push(ultimaEtapa ? 'finalizar' : 'avancar_etapa')
+    if (ultimaEtapa) {
+      acoes.push('finalizar')
+    } else if (vinculado || modoAdmin) {
+      acoes.push('avancar_etapa')
+    }
     return acoes
+  }
+
+  if (status_ciclo === 'Etapa concluida') {
+    if (temOutraEmAndamento && !modoAdmin) return []
+    return ['retomar']
   }
 
   return [] // Finalizada
@@ -99,6 +110,8 @@ export function formatarLaje(tipo: string): string {
   if (tipo === 'TampaCX')  return 'TampaCX'
   const match = tipo.match(/^Laje_(\d+)$/)
   if (match) return `${match[1]}ª Laje`
+  const matchTipo = tipo.match(/^tipo[\s_-]*(\d+)$/i)
+  if (matchTipo) return `${matchTipo[1]}º Tipo`
   return tipo
 }
 

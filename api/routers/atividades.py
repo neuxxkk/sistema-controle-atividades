@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 from sqlalchemy.orm import selectinload
 from typing import List, Optional
 from database import get_db
@@ -33,6 +33,13 @@ async def _get_atividade_ou_404(atividade_id: int, db: AsyncSession) -> models.A
     if not atividade:
         raise HTTPException(status_code=404, detail="Atividade não encontrada")
     return atividade
+
+
+async def _get_usuario_ou_404(usuario_id: int, db: AsyncSession) -> models.Usuario:
+    usuario = await db.get(models.Usuario, usuario_id)
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado")
+    return usuario
 
 
 async def _broadcast():
@@ -234,7 +241,7 @@ async def retomar_atividade(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """Retoma uma tarefa Pausada, abrindo nova sessão (roubo de vínculo permitido)."""
+    """Retoma uma tarefa Pausada/Etapa concluida, abrindo nova sessão (roubo de vínculo permitido quando pausada)."""
     await _validar_maquina_usuario(usuario_id, request, db)
     atividade = await _get_atividade_ou_404(atividade_id, db)
     await workflow.retomar(atividade, usuario_id, db)
@@ -271,6 +278,194 @@ async def finalizar_atividade(
     await workflow.finalizar(atividade, usuario_id, db)
     await db.commit()
     await _broadcast()
+    return await _get_atividade_ou_404(atividade_id, db)
+
+
+@router.post("/{atividade_id}/gerenciamento/definir-etapa", response_model=schemas.Atividade)
+async def definir_etapa_atividade(
+    atividade_id: int,
+    usuario_id: int,
+    etapa_nova: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    await _validar_maquina_usuario(usuario_id, request, db)
+    atividade = await _get_atividade_ou_404(atividade_id, db)
+    usuario = await _get_usuario_ou_404(usuario_id, db)
+
+    if etapa_nova < 1 or etapa_nova > atividade.etapa_total:
+        raise HTTPException(status_code=400, detail=f"Etapa deve estar entre 1 e {atividade.etapa_total}")
+
+    if usuario.role != "admin" and atividade.usuario_responsavel_id != usuario_id:
+        raise HTTPException(status_code=403, detail="Somente o usuário vinculado pode ajustar etapa")
+
+    etapa_anterior = atividade.etapa_atual
+    atividade.etapa_atual = etapa_nova
+    if atividade.status_ciclo == "Finalizada" and etapa_nova < atividade.etapa_total:
+        atividade.status_ciclo = "Etapa concluida"
+        atividade.status_atual = "Pendente"
+    atividade.atualizado_em = datetime.now(timezone.utc)
+
+    db.add(models.StatusHistorico(
+        atividade_id=atividade.id,
+        usuario_id=usuario_id,
+        acao="definir_etapa",
+        status_anterior=atividade.status_ciclo,
+        status_novo=atividade.status_ciclo,
+        etapa_anterior=etapa_anterior,
+        etapa_nova=atividade.etapa_atual,
+        timestamp=datetime.now(timezone.utc),
+    ))
+
+    await db.commit()
+    return await _get_atividade_ou_404(atividade_id, db)
+
+
+@router.post("/{atividade_id}/gerenciamento/desvincular", response_model=schemas.Atividade)
+async def desvincular_atividade(
+    atividade_id: int,
+    usuario_id: int,
+    request: Request,
+    alvo_usuario_id: Optional[int] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    await _validar_maquina_usuario(usuario_id, request, db)
+    atividade = await _get_atividade_ou_404(atividade_id, db)
+    usuario = await _get_usuario_ou_404(usuario_id, db)
+
+    if atividade.status_ciclo != "Pausada":
+        raise HTTPException(status_code=400, detail="Desvincular só é permitido quando a tarefa está Pausada")
+
+    alvo_id = alvo_usuario_id or usuario_id
+    await _get_usuario_ou_404(alvo_id, db)
+
+    if usuario.role != "admin" and alvo_id != usuario_id:
+        raise HTTPException(status_code=403, detail="Somente o usuário vinculado pode se desvincular")
+
+    if atividade.usuario_responsavel_id != alvo_id:
+        raise HTTPException(status_code=400, detail="Usuário alvo não está vinculado atualmente à tarefa")
+
+    atividade.usuario_responsavel_id = None
+    atividade.atualizado_em = datetime.now(timezone.utc)
+
+    db.add(models.StatusHistorico(
+        atividade_id=atividade.id,
+        usuario_id=usuario_id,
+        acao="desvincular",
+        status_anterior=atividade.status_ciclo,
+        status_novo=atividade.status_ciclo,
+        etapa_anterior=atividade.etapa_atual,
+        etapa_nova=atividade.etapa_atual,
+        timestamp=datetime.now(timezone.utc),
+    ))
+
+    await db.commit()
+    return await _get_atividade_ou_404(atividade_id, db)
+
+
+@router.post("/{atividade_id}/gerenciamento/cancelar-vinculo", response_model=schemas.Atividade)
+async def cancelar_vinculo_atividade(
+    atividade_id: int,
+    usuario_id: int,
+    alvo_usuario_id: Optional[int] = None,
+    request: Request = None,
+    db: AsyncSession = Depends(get_db),
+):
+    await _validar_maquina_usuario(usuario_id, request, db)
+    atividade = await _get_atividade_ou_404(atividade_id, db)
+    usuario = await _get_usuario_ou_404(usuario_id, db)
+
+    alvo_id = alvo_usuario_id or usuario_id
+    await _get_usuario_ou_404(alvo_id, db)
+
+    if atividade.status_ciclo != "Pausada":
+        raise HTTPException(status_code=400, detail="Cancelar vínculo só é permitido quando a tarefa está Pausada")
+
+    if usuario.role != "admin" and alvo_id != usuario_id:
+        raise HTTPException(status_code=403, detail="Funcionário só pode cancelar o próprio vínculo")
+
+    await db.execute(
+        delete(models.SessaoTrabalho).where(
+            models.SessaoTrabalho.atividade_id == atividade_id,
+            models.SessaoTrabalho.usuario_id == alvo_id,
+        )
+    )
+    await db.execute(
+        delete(models.StatusHistorico).where(
+            models.StatusHistorico.atividade_id == atividade_id,
+            models.StatusHistorico.usuario_id == alvo_id,
+        )
+    )
+
+    if atividade.usuario_responsavel_id == alvo_id:
+        atividade.usuario_responsavel_id = None
+
+    resultado_sessoes = await db.execute(
+        select(func.count(models.SessaoTrabalho.id)).where(models.SessaoTrabalho.atividade_id == atividade_id)
+    )
+    total_sessoes_restantes = resultado_sessoes.scalar_one() or 0
+
+    if total_sessoes_restantes == 0:
+        atividade.etapa_atual = 1
+        atividade.status_ciclo = "Pendente"
+        atividade.status_atual = "Pendente"
+        atividade.usuario_responsavel_id = None
+
+    atividade.atualizado_em = datetime.now(timezone.utc)
+
+    db.add(models.StatusHistorico(
+        atividade_id=atividade.id,
+        usuario_id=usuario_id,
+        acao="cancelar_vinculo",
+        status_anterior=atividade.status_ciclo,
+        status_novo=atividade.status_ciclo,
+        etapa_anterior=atividade.etapa_atual,
+        etapa_nova=atividade.etapa_atual,
+        timestamp=datetime.now(timezone.utc),
+    ))
+
+    await db.commit()
+    return await _get_atividade_ou_404(atividade_id, db)
+
+
+@router.post("/{atividade_id}/gerenciamento/vincular", response_model=schemas.Atividade)
+async def vincular_atividade_admin(
+    atividade_id: int,
+    usuario_id: int,
+    novo_usuario_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    await _validar_maquina_usuario(usuario_id, request, db)
+    atividade = await _get_atividade_ou_404(atividade_id, db)
+    usuario = await _get_usuario_ou_404(usuario_id, db)
+    novo_usuario = await _get_usuario_ou_404(novo_usuario_id, db)
+
+    if usuario.role != "admin":
+        raise HTTPException(status_code=403, detail="Somente admin pode vincular manualmente")
+    if novo_usuario.role != "funcionario" or not novo_usuario.ativo:
+        raise HTTPException(status_code=400, detail="Usuário alvo deve ser funcionário ativo")
+    if atividade.status_ciclo not in {"Pendente", "Pausada", "Etapa concluida"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Vincular manualmente só é permitido com tarefa Pendente, Pausada ou Etapa concluida",
+        )
+
+    atividade.usuario_responsavel_id = novo_usuario_id
+    atividade.atualizado_em = datetime.now(timezone.utc)
+
+    db.add(models.StatusHistorico(
+        atividade_id=atividade.id,
+        usuario_id=usuario_id,
+        acao="vincular_admin",
+        status_anterior=atividade.status_ciclo,
+        status_novo=atividade.status_ciclo,
+        etapa_anterior=atividade.etapa_atual,
+        etapa_nova=atividade.etapa_atual,
+        timestamp=datetime.now(timezone.utc),
+    ))
+
+    await db.commit()
     return await _get_atividade_ou_404(atividade_id, db)
 
 
