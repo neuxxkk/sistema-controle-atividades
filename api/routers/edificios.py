@@ -15,12 +15,96 @@ router = APIRouter(prefix="", tags=["Edifícios"])
 def _edificio_relacoes():
     return [selectinload(models.Edificio.construtora), selectinload(models.Edificio.lajes)]
 
+
+async def _get_edificio_ou_404(edificio_id: int, db: AsyncSession) -> models.Edificio:
+    query = select(models.Edificio).where(models.Edificio.id == edificio_id).options(*_edificio_relacoes())
+    result = await db.execute(query)
+    edificio = result.scalars().first()
+    if not edificio:
+        raise HTTPException(status_code=404, detail="Edifício não encontrado")
+    return edificio
+
+
+async def _listar_lajes_ordenadas(edificio_id: int, db: AsyncSession) -> list[models.Laje]:
+    result = await db.execute(
+        select(models.Laje)
+        .where(models.Laje.edificio_id == edificio_id)
+        .order_by(models.Laje.ordem.asc(), models.Laje.id.asc())
+    )
+    return result.scalars().all()
+
+
+def _normalizar_ordens(lajes: list[models.Laje]) -> None:
+    for idx, laje in enumerate(lajes, start=1):
+        laje.ordem = idx
+
+
+def _atividade_pendente(atividade: models.Atividade) -> bool:
+    return atividade.status_ciclo == "Pendente"
+
+
+async def _validar_laje_editavel(laje: models.Laje, db: AsyncSession) -> None:
+    result = await db.execute(select(models.Atividade).where(models.Atividade.laje_id == laje.id))
+    atividades = result.scalars().all()
+    if any(not _atividade_pendente(a) for a in atividades):
+        raise HTTPException(
+            status_code=409,
+            detail="Só é permitido alterar/excluir pavimentos com tarefas totalmente pendentes.",
+        )
+
+
+async def _criar_atividades_padrao_laje(laje_id: int, db: AsyncSession) -> None:
+    for ativ in geracao_lajes.ATIVIDADES_POR_LAJE:
+        db.add(models.Atividade(
+            laje_id=laje_id,
+            tipo_elemento=ativ["tipo_elemento"],
+            subtipo=ativ["subtipo"],
+            status_atual="Pendente",
+            status_ciclo="Pendente",
+            etapa_atual=1,
+            etapa_total=ativ["etapa_total"],
+        ))
+
+
+async def _garantir_atividades_gerais(edificio_id: int, db: AsyncSession) -> None:
+    lajes = await _listar_lajes_ordenadas(edificio_id, db)
+    if not lajes:
+        return
+    laje_ref = next((l for l in lajes if l.tipo == "Fundacao"), lajes[0])
+
+    for ativ in geracao_lajes.ATIVIDADES_GERAIS_EDIFICIO:
+        db.add(models.Atividade(
+            laje_id=laje_ref.id,
+            tipo_elemento=ativ["tipo_elemento"],
+            subtipo=ativ["subtipo"],
+            status_atual="Pendente",
+            status_ciclo="Pendente",
+            etapa_atual=1,
+            etapa_total=ativ["etapa_total"],
+        ))
+
 @router.get("/", response_model=List[schemas.EdificioComLajes])
 async def read_edificios(include_encerrados: bool = False, db: AsyncSession = Depends(get_db)):
     # Aqui poderíamos calcular o percentual_conclusao no SQL ou retornar o objeto simples
     query = select(models.Edificio).options(*_edificio_relacoes())
     if not include_encerrados:
         query = query.where(models.Edificio.encerrado_em == None)
+    result = await db.execute(query)
+    return result.scalars().all()
+
+
+@router.get("/estruturas")
+async def read_edificios_estruturas(include_encerrados: bool = False, db: AsyncSession = Depends(get_db)):
+    """Retorna todas as estruturas completas em uma única chamada (edifício > lajes > atividades)."""
+    query = select(models.Edificio).options(
+        selectinload(models.Edificio.construtora),
+        selectinload(models.Edificio.lajes)
+        .selectinload(models.Laje.atividades)
+        .selectinload(models.Atividade.usuario_responsavel),
+    )
+    if not include_encerrados:
+        query = query.where(models.Edificio.encerrado_em == None)
+
     result = await db.execute(query)
     return result.scalars().all()
 
@@ -35,12 +119,24 @@ async def create_edificio(edificio: schemas.EdificioCreate, db: AsyncSession = D
     db.add(db_edificio)
     await db.flush() # Para obter o ID
     
-    # Gerar estrutura (lajes + atividades)
-    await geracao_lajes.criar_estrutura_edificio(
-        edificio_id=db_edificio.id, 
-        num_pavimentos=edificio.num_pavimentos, 
-        db=db
-    )
+    if edificio.lajes_customizadas:
+        for idx, laje_input in enumerate(edificio.lajes_customizadas, start=1):
+            nova_laje = models.Laje(
+                edificio_id=db_edificio.id,
+                tipo=laje_input.tipo,
+                ordem=idx,
+            )
+            db.add(nova_laje)
+            await db.flush()
+            await _criar_atividades_padrao_laje(nova_laje.id, db)
+        await _garantir_atividades_gerais(db_edificio.id, db)
+    else:
+        # Gerar estrutura padrão (lajes + atividades)
+        await geracao_lajes.criar_estrutura_edificio(
+            edificio_id=db_edificio.id,
+            num_pavimentos=edificio.num_pavimentos,
+            db=db
+        )
     
     await db.commit()
     query = select(models.Edificio).where(models.Edificio.id == db_edificio.id).options(*_edificio_relacoes())
@@ -161,3 +257,143 @@ async def delete_edificio(edificio_id: int, hard_delete: bool = False, db: Async
 
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{edificio_id}/lajes", response_model=schemas.EdificioComLajes)
+async def criar_laje(
+    edificio_id: int,
+    payload: schemas.LajeCreateRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    await _get_edificio_ou_404(edificio_id, db)
+    lajes = await _listar_lajes_ordenadas(edificio_id, db)
+
+    ordem_destino = payload.ordem if payload.ordem is not None else len(lajes) + 1
+    ordem_destino = max(1, min(ordem_destino, len(lajes) + 1))
+
+    nova = models.Laje(edificio_id=edificio_id, tipo=payload.tipo, ordem=ordem_destino)
+    db.add(nova)
+    await db.flush()
+    await _criar_atividades_padrao_laje(nova.id, db)
+
+    lajes = await _listar_lajes_ordenadas(edificio_id, db)
+    lajes.remove(nova)
+    lajes.insert(ordem_destino - 1, nova)
+    _normalizar_ordens(lajes)
+
+    await db.commit()
+    return await _get_edificio_ou_404(edificio_id, db)
+
+
+@router.put("/{edificio_id}/lajes/{laje_id}", response_model=schemas.EdificioComLajes)
+async def editar_laje(
+    edificio_id: int,
+    laje_id: int,
+    payload: schemas.LajeUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    await _get_edificio_ou_404(edificio_id, db)
+    lajes = await _listar_lajes_ordenadas(edificio_id, db)
+    laje = next((l for l in lajes if l.id == laje_id), None)
+    if not laje:
+        raise HTTPException(status_code=404, detail="Pavimento não encontrado")
+
+    await _validar_laje_editavel(laje, db)
+
+    if payload.tipo is not None and payload.tipo.strip():
+        laje.tipo = payload.tipo.strip()
+
+    if payload.ordem is not None:
+        nova_ordem = max(1, min(payload.ordem, len(lajes)))
+        lajes.remove(laje)
+        lajes.insert(nova_ordem - 1, laje)
+        _normalizar_ordens(lajes)
+
+    await db.commit()
+    return await _get_edificio_ou_404(edificio_id, db)
+
+
+@router.post("/{edificio_id}/lajes/{laje_id}/mover", response_model=schemas.EdificioComLajes)
+async def mover_laje(
+    edificio_id: int,
+    laje_id: int,
+    direcao: str,
+    db: AsyncSession = Depends(get_db),
+):
+    await _get_edificio_ou_404(edificio_id, db)
+    lajes = await _listar_lajes_ordenadas(edificio_id, db)
+    idx = next((i for i, l in enumerate(lajes) if l.id == laje_id), -1)
+    if idx < 0:
+        raise HTTPException(status_code=404, detail="Pavimento não encontrado")
+
+    laje = lajes[idx]
+    await _validar_laje_editavel(laje, db)
+
+    if direcao == "cima":
+        if idx == 0:
+            raise HTTPException(status_code=400, detail="Pavimento já está no topo")
+        lajes[idx - 1], lajes[idx] = lajes[idx], lajes[idx - 1]
+    elif direcao == "baixo":
+        if idx == len(lajes) - 1:
+            raise HTTPException(status_code=400, detail="Pavimento já está na base")
+        lajes[idx + 1], lajes[idx] = lajes[idx], lajes[idx + 1]
+    else:
+        raise HTTPException(status_code=400, detail="Direção inválida. Use 'cima' ou 'baixo'.")
+
+    _normalizar_ordens(lajes)
+    await db.commit()
+    return await _get_edificio_ou_404(edificio_id, db)
+
+
+@router.delete("/{edificio_id}/lajes/{laje_id}", response_model=schemas.EdificioComLajes)
+async def excluir_laje(
+    edificio_id: int,
+    laje_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    await _get_edificio_ou_404(edificio_id, db)
+    lajes = await _listar_lajes_ordenadas(edificio_id, db)
+    laje = next((l for l in lajes if l.id == laje_id), None)
+    if not laje:
+        raise HTTPException(status_code=404, detail="Pavimento não encontrado")
+
+    await _validar_laje_editavel(laje, db)
+    await db.delete(laje)
+    await db.flush()
+
+    lajes_restantes = await _listar_lajes_ordenadas(edificio_id, db)
+    _normalizar_ordens(lajes_restantes)
+    await db.commit()
+    return await _get_edificio_ou_404(edificio_id, db)
+
+
+@router.post("/{edificio_id}/lajes/delecao-lote", response_model=schemas.EdificioComLajes)
+async def excluir_lajes_em_lote(
+    edificio_id: int,
+    payload: schemas.LajeBulkDeleteRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    await _get_edificio_ou_404(edificio_id, db)
+    if not payload.laje_ids:
+        raise HTTPException(status_code=400, detail="Informe ao menos um pavimento para exclusão")
+
+    lajes = await _listar_lajes_ordenadas(edificio_id, db)
+    ids_validos = {l.id for l in lajes}
+    ids_alvo = [l_id for l_id in payload.laje_ids if l_id in ids_validos]
+    if not ids_alvo:
+        raise HTTPException(status_code=404, detail="Nenhum pavimento válido encontrado para exclusão")
+
+    for laje in lajes:
+        if laje.id in ids_alvo:
+            await _validar_laje_editavel(laje, db)
+
+    for laje in lajes:
+        if laje.id in ids_alvo:
+            await db.delete(laje)
+
+    await db.flush()
+    lajes_restantes = await _listar_lajes_ordenadas(edificio_id, db)
+    _normalizar_ordens(lajes_restantes)
+
+    await db.commit()
+    return await _get_edificio_ou_404(edificio_id, db)
